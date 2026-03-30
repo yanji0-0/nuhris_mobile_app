@@ -1,7 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
+
 import '../navigation/app_nav.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
@@ -52,7 +54,9 @@ class _AccountScreenState extends State<AccountScreen> {
       firstDate: DateTime(now.year - 60),
       lastDate: DateTime(now.year + 2),
     );
+
     if (picked == null) return;
+
     _dateHiredCtrl.text =
         '${picked.month.toString().padLeft(2, '0')}/${picked.day.toString().padLeft(2, '0')}/${picked.year}';
   }
@@ -121,6 +125,7 @@ class _AccountScreenState extends State<AccountScreen> {
       imageQuality: 85,
       maxWidth: 1600,
     );
+
     if (pickedFile == null) return;
     await _cropImage(pickedFile.path);
   }
@@ -131,6 +136,7 @@ class _AccountScreenState extends State<AccountScreen> {
       imageQuality: 85,
       maxWidth: 1600,
     );
+
     if (pickedFile == null) return;
     await _cropImage(pickedFile.path);
   }
@@ -143,9 +149,12 @@ class _AccountScreenState extends State<AccountScreen> {
       compressQuality: 85,
       uiSettings: [
         AndroidUiSettings(
-          toolbarTitle: 'Crop Profile Photo',
+          toolbarTitle: 'Crop Photo',
           toolbarColor: AppColors.primaryBlue,
           toolbarWidgetColor: Colors.white,
+          backgroundColor: Colors.black,
+          activeControlsWidgetColor: AppColors.primaryBlue,
+          dimmedLayerColor: Colors.black54,
           initAspectRatio: CropAspectRatioPreset.square,
           lockAspectRatio: false,
           hideBottomControls: false,
@@ -159,7 +168,10 @@ class _AccountScreenState extends State<AccountScreen> {
     );
 
     if (!mounted || croppedImage == null) return;
-    setState(() => _profilePhoto = XFile(croppedImage.path));
+
+    setState(() {
+      _profilePhoto = XFile(croppedImage.path);
+    });
   }
 
   InputDecoration _inputDecoration({String? hintText}) {
@@ -204,15 +216,16 @@ class _AccountScreenState extends State<AccountScreen> {
             onPressed: () => widget.onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
             tooltip: 'Notifications',
-      ),
+          ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(8, 14, 8, 18),
         children: [
-          // Profile header card
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Column(
               children: [
                 Container(
@@ -240,10 +253,14 @@ class _AccountScreenState extends State<AccountScreen> {
                                 radius: 31,
                                 backgroundColor: const Color(0xFFE9EEF3),
                                 backgroundImage: _profilePhoto != null
-                                  ? FileImage(File(_profilePhoto!.path))
+                                    ? FileImage(File(_profilePhoto!.path))
                                     : null,
                                 child: _profilePhoto == null
-                                    ? const Icon(Icons.person, size: 38, color: Color(0xFF7B8794))
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 38,
+                                        color: Color(0xFF7B8794),
+                                      )
                                     : null,
                               ),
                             ),
@@ -256,7 +273,11 @@ class _AccountScreenState extends State<AccountScreen> {
                                   color: AppColors.primaryBlue,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ],
@@ -273,7 +294,10 @@ class _AccountScreenState extends State<AccountScreen> {
                       const SizedBox(height: 2),
                       const Text(
                         'martinezian@gmail.com',
-                        style: TextStyle(color: AppColors.mutedText, fontSize: 12),
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -282,11 +306,11 @@ class _AccountScreenState extends State<AccountScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 10),
-
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
               child: Column(
@@ -300,7 +324,6 @@ class _AccountScreenState extends State<AccountScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-
                   const _FieldLabel('Employee Type'),
                   DropdownButtonFormField<String>(
                     initialValue: employeeType,
@@ -311,28 +334,25 @@ class _AccountScreenState extends State<AccountScreen> {
                         .toList(),
                     onChanged: (v) => setState(() => employeeType = v),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Employee ID'),
                   TextField(
                     controller: _employeeIdCtrl,
                     decoration: _inputDecoration(hintText: 'e.g., NU-2025-001'),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Department'),
                   TextField(
                     controller: _departmentCtrl,
                     decoration: _inputDecoration(hintText: 'e.g., SACE'),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Position'),
                   TextField(
                     controller: _positionCtrl,
-                    decoration: _inputDecoration(hintText: 'e.g., Instructor I'),
+                    decoration:
+                        _inputDecoration(hintText: 'e.g., Instructor I'),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Phone'),
                   TextField(
@@ -340,7 +360,6 @@ class _AccountScreenState extends State<AccountScreen> {
                     keyboardType: TextInputType.phone,
                     decoration: _inputDecoration(hintText: 'e.g., 09171234567'),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Date Hired'),
                   TextField(
@@ -349,14 +368,12 @@ class _AccountScreenState extends State<AccountScreen> {
                     onTap: _pickDateHired,
                     decoration: _inputDecoration(hintText: 'mm/dd/yyyy'),
                   ),
-
                   const SizedBox(height: 10),
                   const _FieldLabel('Address'),
                   TextField(
                     controller: _addressCtrl,
                     decoration: _inputDecoration(hintText: 'Home Address'),
                   ),
-
                   const SizedBox(height: 16),
                   SizedBox(
                     height: 40,
@@ -393,6 +410,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
 class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.text);
+
   final String text;
 
   @override
