@@ -104,7 +104,7 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
                   children: [
                     const Text(
                       'Profile Information',
-                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                      style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 14),
 

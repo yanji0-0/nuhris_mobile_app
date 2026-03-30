@@ -286,7 +286,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Ian Isan Martinez',
+                        'Ian Isaac Martinez',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 24,
@@ -320,7 +320,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   const Text(
                     'Profile Information',
                     style: TextStyle(
-                      fontSize: 30,
+                      fontSize: 25,
                       fontWeight: FontWeight.w800,
                     ),
                   ),

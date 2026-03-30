@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   static const navy = Color(0xFF063A63); // deep blue/navy
@@ -26,9 +27,11 @@ ThemeData buildAppTheme() {
   );
 
   return base.copyWith(
+    textTheme: GoogleFonts.interTextTheme(base.textTheme),
+    primaryTextTheme: GoogleFonts.interTextTheme(base.primaryTextTheme),
     scaffoldBackgroundColor: AppColors.pageBg,
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.primaryBlue,
+      backgroundColor: AppColors.navy,
       foregroundColor: Colors.white,
       centerTitle: false,
       elevation: 2,

@@ -72,7 +72,7 @@ class LeaveMonitoringScreen extends StatelessWidget {
                     'Leave History',
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
-                      fontSize: 32,
+                      fontSize: 30,
                       color: Color(0xFF444444),
                     ),
                   ),

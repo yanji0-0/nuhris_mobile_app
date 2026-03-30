@@ -160,7 +160,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 child: Text(
                   'No Notifications Found',
                   style: TextStyle(
-                    fontSize: 36,
+                    fontSize: 25,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF454545),
                   ),

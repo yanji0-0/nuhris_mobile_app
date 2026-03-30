@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../navigation/app_nav.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/dashboard_calendar.dart';
 import '../widgets/section_title.dart';
 import '../widgets/summary_card.dart';
 
@@ -152,20 +153,18 @@ class DashboardScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    _MiniCalendarHeader(monthLabel: 'February 2026'),
-                    SizedBox(height: 10),
-                    _MiniCalendarGrid(),
-                    SizedBox(height: 12),
-                    Text('UPCOMING EVENTS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.mutedText)),
-                    SizedBox(height: 10),
-                    _EventRow(color: AppColors.orange, title: 'EDSA People Power Anniversary', subtitle: 'Feb 25, 2026'),
-                    SizedBox(height: 8),
-                    _EventRow(color: AppColors.purple, title: 'CHED Compliance Deadline', subtitle: 'Feb 22, 2026'),
-                    SizedBox(height: 8),
-                    _EventRow(color: AppColors.primaryBlue, title: 'Midterm Exams', subtitle: 'Mar 3, 2026'),
-                    SizedBox(height: 8),
-                    _EventRow(color: AppColors.amber, title: 'Faculty Development Seminar', subtitle: 'Mar 15, 2026'),
+                  children: [
+                    DashboardCalendar(),
+                    const SizedBox(height: 12),
+                    const Text('UPCOMING EVENTS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.mutedText)),
+                    const SizedBox(height: 10),
+                    const _EventRow(color: AppColors.orange, title: 'EDSA People Power Anniversary', subtitle: 'Feb 25, 2026'),
+                    const SizedBox(height: 8),
+                    const _EventRow(color: AppColors.purple, title: 'CHED Compliance Deadline', subtitle: 'Feb 22, 2026'),
+                    const SizedBox(height: 8),
+                    const _EventRow(color: AppColors.primaryBlue, title: 'Midterm Exams', subtitle: 'Mar 3, 2026'),
+                    const SizedBox(height: 8),
+                    const _EventRow(color: AppColors.amber, title: 'Faculty Development Seminar', subtitle: 'Mar 15, 2026'),
                   ],
                 ),
               ),
@@ -248,70 +247,6 @@ class _AlertTile extends StatelessWidget {
         subtitle: Text(subtitle, style: const TextStyle(color: AppColors.mutedText, fontSize: 11)),
         onTap: () {},
       ),
-    );
-  }
-}
-
-class _MiniCalendarHeader extends StatelessWidget {
-  const _MiniCalendarHeader({required this.monthLabel});
-  final String monthLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Spacer(),
-        IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_left)),
-        Text(monthLabel, style: const TextStyle(fontWeight: FontWeight.w900)),
-        IconButton(onPressed: () {}, icon: const Icon(Icons.chevron_right)),
-        const Spacer(),
-      ],
-    );
-  }
-}
-
-class _MiniCalendarGrid extends StatelessWidget {
-  const _MiniCalendarGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: days
-              .map((d) => SizedBox(
-                    width: 34,
-                    child: Text(d, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                  ))
-              .toList(),
-        ),
-        const SizedBox(height: 8),
-        // Simple placeholder grid (not real calendar logic yet)
-        for (int week = 0; week < 5; week++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(7, (i) {
-                final day = week * 7 + i + 1;
-                final show = day <= 28 ? day.toString() : '';
-                final highlight = (day == 22 || day == 25);
-                return Container(
-                  width: 34,
-                  height: 28,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: highlight ? AppColors.primaryBlue.withValues(alpha: 0.10) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(show, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: highlight ? AppColors.primaryBlue : Colors.black87)),
-                );
-              }),
-            ),
-          ),
-      ],
     );
   }
 }
