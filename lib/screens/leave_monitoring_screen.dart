@@ -28,7 +28,7 @@ class LeaveMonitoringScreen extends StatelessWidget {
         title: const Text('Leave Monitoring'),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
             tooltip: 'Notifications',
           ),

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import '../navigation/app_nav.dart';
 import '../theme/app_theme.dart';
 
 class CredentialUploadScreen extends StatefulWidget {
-  const CredentialUploadScreen({super.key});
+  const CredentialUploadScreen({super.key, required this.onNavigate});
+
+  final ValueChanged<AppNavItem> onNavigate;
 
   @override
   State<CredentialUploadScreen> createState() => _CredentialUploadScreenState();
@@ -58,7 +61,7 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
         title: const Text('Credentials'),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => widget.onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
           ),
         ],
@@ -107,7 +110,7 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
 
                     const _FieldLabel('Credential Type'),
                     DropdownButtonFormField<String>(
-                      value: _credentialType,
+                      initialValue: _credentialType,
                       hint: const Text('Select type'),
                       decoration: _inputDecoration(),
                       items: _types

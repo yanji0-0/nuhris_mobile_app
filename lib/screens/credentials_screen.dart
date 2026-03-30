@@ -45,7 +45,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         title: const Text('Credentials'),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () => widget.onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
             tooltip: 'Notifications',
           )
@@ -75,7 +75,9 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const CredentialUploadScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => CredentialUploadScreen(onNavigate: widget.onNavigate),
+                    ),
                    );
                  },
               ),
