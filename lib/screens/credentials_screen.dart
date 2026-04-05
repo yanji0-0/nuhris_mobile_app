@@ -5,9 +5,14 @@ import '../widgets/app_drawer.dart';
 import 'credential_upload_screen.dart';
 
 class CredentialsScreen extends StatefulWidget {
-  const CredentialsScreen({super.key, required this.onNavigate});
+  const CredentialsScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSignOut,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final VoidCallback onSignOut;
 
   @override
   State<CredentialsScreen> createState() => _CredentialsScreenState();
@@ -34,12 +39,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: () {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign out tapped (UI only)')),
-          );
-        },
+        onSignOut: widget.onSignOut,
       ),
       appBar: AppBar(
         title: const Text('Credentials'),

@@ -4,9 +4,14 @@ import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
 class LeaveMonitoringScreen extends StatelessWidget {
-  const LeaveMonitoringScreen({super.key, required this.onNavigate});
+  const LeaveMonitoringScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSignOut,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -17,12 +22,7 @@ class LeaveMonitoringScreen extends StatelessWidget {
           Navigator.pop(context);
           onNavigate(item);
         },
-        onSignOut: () {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign out tapped (UI only)')),
-          );
-        },
+        onSignOut: onSignOut,
       ),
       appBar: AppBar(
         title: const Text('Leave Monitoring'),

@@ -4,9 +4,14 @@ import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
 class AttendanceDtrScreen extends StatefulWidget {
-  const AttendanceDtrScreen({super.key, required this.onNavigate});
+  const AttendanceDtrScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSignOut,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final VoidCallback onSignOut;
 
   @override
   State<AttendanceDtrScreen> createState() => _AttendanceDtrScreenState();
@@ -25,12 +30,7 @@ class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: () {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign out tapped (UI only)')),
-          );
-        },
+        onSignOut: widget.onSignOut,
       ),
       appBar: AppBar(
         title: const Text('Attendance & DTR'),

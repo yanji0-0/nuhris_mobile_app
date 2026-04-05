@@ -9,9 +9,14 @@ import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
 class AccountScreen extends StatefulWidget {
-  const AccountScreen({super.key, required this.onNavigate});
+  const AccountScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSignOut,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final VoidCallback onSignOut;
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -203,12 +208,7 @@ class _AccountScreenState extends State<AccountScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: () {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign out tapped (UI only)')),
-          );
-        },
+        onSignOut: widget.onSignOut,
       ),
       appBar: AppBar(
         title: const Text('Account'),

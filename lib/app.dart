@@ -9,7 +9,12 @@ import 'screens/notifications_screen.dart';
 import 'theme/app_theme.dart';
 
 class NuhrisEmployeeApp extends StatefulWidget {
-  const NuhrisEmployeeApp({super.key});
+  const NuhrisEmployeeApp({
+    super.key,
+    required this.onSignOut,
+  });
+
+  final VoidCallback onSignOut;
 
   @override
   State<NuhrisEmployeeApp> createState() => _NuhrisEmployeeAppState();
@@ -28,12 +33,12 @@ class _NuhrisEmployeeAppState extends State<NuhrisEmployeeApp> {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: switch (current) {
-        AppNavItem.dashboard => DashboardScreen(onNavigate: _navigate),
-        AppNavItem.credentials => CredentialsScreen(onNavigate: _navigate),
-        AppNavItem.attendanceDtr => AttendanceDtrScreen(onNavigate: _navigate),
-        AppNavItem.leaveMonitoring => LeaveMonitoringScreen(onNavigate: _navigate),
-        AppNavItem.notifications => NotificationsScreen(onNavigate: _navigate),
-        AppNavItem.account => AccountScreen(onNavigate: _navigate),
+        AppNavItem.dashboard => DashboardScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
+        AppNavItem.credentials => CredentialsScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
+        AppNavItem.attendanceDtr => AttendanceDtrScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
+        AppNavItem.leaveMonitoring => LeaveMonitoringScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
+        AppNavItem.notifications => NotificationsScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
+        AppNavItem.account => AccountScreen(onNavigate: _navigate, onSignOut: widget.onSignOut),
       },
     );
   }

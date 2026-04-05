@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'app.dart';
+import 'app_shell.dart';
 
 void main() {
-  runApp(const NuhrisEmployeeApp());
-
-
+  runApp(const AppShell());
 }

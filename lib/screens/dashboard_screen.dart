@@ -7,9 +7,14 @@ import '../widgets/section_title.dart';
 import '../widgets/summary_card.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key, required this.onNavigate});
+  const DashboardScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSignOut,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -20,13 +25,7 @@ class DashboardScreen extends StatelessWidget {
           Navigator.pop(context);
           onNavigate(item);
         },
-        onSignOut: () {
-          Navigator.pop(context);
-          // UI-only: no sign out logic yet
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sign out tapped (UI only)')),
-          );
-        },
+        onSignOut: onSignOut,
       ),
       appBar: AppBar(
         title: const Text('Dashboard'),
