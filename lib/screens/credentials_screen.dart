@@ -78,13 +78,11 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                     MaterialPageRoute(
                       builder: (_) => CredentialUploadScreen(onNavigate: widget.onNavigate),
                     ),
-                   );
-                 },
+                  );
+                },
               ),
             ),
             const SizedBox(height: 12),
-
-            // Tabs / filter bar
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
@@ -122,7 +120,6 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 28),
             Expanded(
               child: Center(

@@ -40,7 +40,6 @@ class _AccountScreenState extends State<AccountScreen> {
     'ASP',
   ];
 
-
   @override
   void dispose() {
     _employeeIdCtrl.dispose();
@@ -224,19 +223,14 @@ class _AccountScreenState extends State<AccountScreen> {
         padding: const EdgeInsets.fromLTRB(8, 14, 8, 18),
         children: [
           Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             child: Column(
               children: [
                 Container(
                   height: 72,
                   decoration: const BoxDecoration(
                     color: AppColors.navy,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(14),
-                      topRight: Radius.circular(14),
-                    ),
+                    borderRadius: BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
                   ),
                 ),
                 Transform.translate(
@@ -253,16 +247,8 @@ class _AccountScreenState extends State<AccountScreen> {
                               child: CircleAvatar(
                                 radius: 31,
                                 backgroundColor: const Color(0xFFE9EEF3),
-                                backgroundImage: _profilePhoto != null
-                                    ? FileImage(File(_profilePhoto!.path))
-                                    : null,
-                                child: _profilePhoto == null
-                                    ? const Icon(
-                                        Icons.person,
-                                        size: 38,
-                                        color: Color(0xFF7B8794),
-                                      )
-                                    : null,
+                                backgroundImage: _profilePhoto != null ? FileImage(File(_profilePhoto!.path)) : null,
+                                child: _profilePhoto == null ? const Icon(Icons.person, size: 38, color: Color(0xFF7B8794)) : null,
                               ),
                             ),
                             Positioned(
@@ -270,36 +256,17 @@ class _AccountScreenState extends State<AccountScreen> {
                               bottom: 0,
                               child: Container(
                                 padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: AppColors.primaryBlue,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.camera_alt,
-                                  size: 14,
-                                  color: Colors.white,
-                                ),
+                                decoration: const BoxDecoration(color: AppColors.primaryBlue, shape: BoxShape.circle),
+                                child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
                               ),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        'Ian Isaac Martinez',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 24,
-                        ),
-                      ),
+                      const Text('Ian Isaac Martinez', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 24)),
                       const SizedBox(height: 2),
-                      const Text(
-                        'martinezian@gmail.com',
-                        style: TextStyle(
-                          color: AppColors.mutedText,
-                          fontSize: 12,
-                        ),
-                      ),
+                      const Text('martinezian@gmail.com', style: TextStyle(color: AppColors.mutedText, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -309,94 +276,55 @@ class _AccountScreenState extends State<AccountScreen> {
           ),
           const SizedBox(height: 10),
           Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Profile Information',
-                    style: TextStyle(
-                      fontSize: 25,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                  const Text('Profile Information', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 14),
                   const _FieldLabel('Employee Type'),
                   DropdownButtonFormField<String>(
                     initialValue: employeeType,
                     isExpanded: true,
                     decoration: _inputDecoration(hintText: 'Select type'),
-                    items: employeeTypes
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                        .toList(),
+                    items: employeeTypes.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
                     onChanged: (v) => setState(() => employeeType = v),
                   ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Employee ID'),
-                  TextField(
-                    controller: _employeeIdCtrl,
-                    decoration: _inputDecoration(hintText: 'e.g., NU-2025-001'),
-                  ),
+                  TextField(controller: _employeeIdCtrl, decoration: _inputDecoration(hintText: 'e.g., NU-2025-001')),
                   const SizedBox(height: 10),
                   const _FieldLabel('Department'),
-                  TextField(
-                    controller: _departmentCtrl,
-                    decoration: _inputDecoration(hintText: 'e.g., SACE'),
-                  ),
+                  TextField(controller: _departmentCtrl, decoration: _inputDecoration(hintText: 'e.g., SACE')),
                   const SizedBox(height: 10),
                   const _FieldLabel('Position'),
-                  TextField(
-                    controller: _positionCtrl,
-                    decoration:
-                        _inputDecoration(hintText: 'e.g., Instructor I'),
-                  ),
+                  TextField(controller: _positionCtrl, decoration: _inputDecoration(hintText: 'e.g., Instructor I')),
                   const SizedBox(height: 10),
                   const _FieldLabel('Phone'),
-                  TextField(
-                    controller: _phoneCtrl,
-                    keyboardType: TextInputType.phone,
-                    decoration: _inputDecoration(hintText: 'e.g., 09171234567'),
-                  ),
+                  TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: _inputDecoration(hintText: 'e.g., 09171234567')),
                   const SizedBox(height: 10),
                   const _FieldLabel('Date Hired'),
-                  TextField(
-                    controller: _dateHiredCtrl,
-                    readOnly: true,
-                    onTap: _pickDateHired,
-                    decoration: _inputDecoration(hintText: 'mm/dd/yyyy'),
-                  ),
+                  TextField(controller: _dateHiredCtrl, readOnly: true, onTap: _pickDateHired, decoration: _inputDecoration(hintText: 'mm/dd/yyyy')),
                   const SizedBox(height: 10),
                   const _FieldLabel('Address'),
-                  TextField(
-                    controller: _addressCtrl,
-                    decoration: _inputDecoration(hintText: 'Home Address'),
-                  ),
+                  TextField(controller: _addressCtrl, decoration: _inputDecoration(hintText: 'Home Address')),
                   const SizedBox(height: 16),
                   SizedBox(
                     height: 40,
                     child: ElevatedButton.icon(
                       onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Saved (UI only)')),
-                        );
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved (UI only)')));
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF014A8D),
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                       ),
                       icon: const Icon(Icons.save_outlined, size: 18),
-                      label: const Text(
-                        'Save Changes',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
+                      label: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ),
                 ],
@@ -411,17 +339,13 @@ class _AccountScreenState extends State<AccountScreen> {
 
 class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.text);
-
   final String text;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Text(
-        text,
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
+      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
     );
   }
 }

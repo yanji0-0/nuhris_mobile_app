@@ -47,7 +47,6 @@ class DashboardScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Column(
@@ -86,7 +85,6 @@ class DashboardScreen extends StatelessWidget {
               ],
             ),
           ),
-
           const SectionTitle(title: 'Compliance Status'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -105,45 +103,22 @@ class DashboardScreen extends StatelessWidget {
               ),
             ),
           ),
-
           SectionTitle(
             title: 'Recent Alerts',
-            trailing: TextButton(
-              onPressed: () {},
-              child: const Text('View All'),
-            ),
+            trailing: TextButton(onPressed: () {}, child: const Text('View All')),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Column(
               children: const [
-                _AlertTile(
-                  iconBg: Color(0xFFEFF6FF),
-                  icon: Icons.badge_outlined,
-                  iconColor: AppColors.primaryBlue,
-                  title: 'PRC License Renewal Reminder',
-                  subtitle: 'Feb 15, 2026 9:25 PM',
-                ),
+                _AlertTile(iconBg: Color(0xFFEFF6FF), icon: Icons.badge_outlined, iconColor: AppColors.primaryBlue, title: 'PRC License Renewal Reminder', subtitle: 'Feb 15, 2026 9:25 PM'),
                 SizedBox(height: 10),
-                _AlertTile(
-                  iconBg: Color(0xFFF0FDF4),
-                  icon: Icons.schedule,
-                  iconColor: AppColors.green,
-                  title: 'DTR Released: January 16–31',
-                  subtitle: 'Feb 12, 2026 9:58 PM',
-                ),
+                _AlertTile(iconBg: Color(0xFFF0FDF4), icon: Icons.schedule, iconColor: AppColors.green, title: 'DTR Released: January 16–31', subtitle: 'Feb 12, 2026 9:58 PM'),
                 SizedBox(height: 10),
-                _AlertTile(
-                  iconBg: Color(0xFFFFFBEB),
-                  icon: Icons.campaign_outlined,
-                  iconColor: AppColors.amber,
-                  title: 'New Leave Policy Update',
-                  subtitle: 'Feb 1, 2026 5:21 PM',
-                ),
+                _AlertTile(iconBg: Color(0xFFFFFBEB), icon: Icons.campaign_outlined, iconColor: AppColors.amber, title: 'New Leave Policy Update', subtitle: 'Feb 1, 2026 5:21 PM'),
               ],
             ),
           ),
-
           const SectionTitle(title: 'System Calendar'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -176,13 +151,7 @@ class DashboardScreen extends StatelessWidget {
 }
 
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({
-    required this.label,
-    required this.color,
-    required this.value,
-    required this.icon,
-  });
-
+  const _StatusRow({required this.label, required this.color, required this.value, required this.icon});
   final String label;
   final Color color;
   final String value;
@@ -218,14 +187,7 @@ class _StatusRow extends StatelessWidget {
 }
 
 class _AlertTile extends StatelessWidget {
-  const _AlertTile({
-    required this.iconBg,
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-  });
-
+  const _AlertTile({required this.iconBg, required this.icon, required this.iconColor, required this.title, required this.subtitle});
   final Color iconBg;
   final IconData icon;
   final Color iconColor;
@@ -252,7 +214,6 @@ class _AlertTile extends StatelessWidget {
 
 class _EventRow extends StatelessWidget {
   const _EventRow({required this.color, required this.title, required this.subtitle});
-
   final Color color;
   final String title;
   final String subtitle;
