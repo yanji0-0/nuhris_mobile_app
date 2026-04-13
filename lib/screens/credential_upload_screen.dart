@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import '../navigation/app_nav.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 
 class CredentialUploadScreen extends StatefulWidget {
-  const CredentialUploadScreen({super.key, required this.onNavigate});
+  const CredentialUploadScreen({
+    super.key,
+    required this.onNavigate,
+    required this.onSubmitted,
+  });
 
   final ValueChanged<AppNavItem> onNavigate;
+  final Future<void> Function() onSubmitted;
 
   @override
   State<CredentialUploadScreen> createState() => _CredentialUploadScreenState();
@@ -18,6 +24,7 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
 
   DateTime? _expirationDate;
   String? _credentialType;
+  bool _isSubmitting = false;
 
   final List<String> _types = const [
     'Resume',
@@ -191,7 +198,59 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
                     SizedBox(
                       height: 38,
                       child: ElevatedButton(
-                        onPressed: () {},
+                        onPressed: _isSubmitting
+                            ? null
+                            : () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                if (_credentialType == null || _titleController.text.trim().isEmpty) {
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Credential type and title are required.')),
+                                  );
+                                  return;
+                                }
+
+                                setState(() => _isSubmitting = true);
+                                try {
+                                  final account = await ApiClient.instance.getAccount();
+                                  final employee = (account['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+                                  final employeeId = employee['id'];
+
+                                  if (employeeId == null) {
+                                    throw Exception('Employee profile not found for this account.');
+                                  }
+
+                                  await ApiClient.instance.createEmployeeCredential({
+                                    'employee_id': employeeId,
+                                    'credential_type': _mapCredentialType(_credentialType!),
+                                    'title': _titleController.text.trim(),
+                                    'description': _descriptionController.text.trim(),
+                                    'expires_at': _expirationDate?.toIso8601String(),
+                                    'status': 'pending',
+                                    'department_id': null,
+                                    'file_path': null,
+                                  });
+
+                                  await widget.onSubmitted();
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Credential submitted successfully.')),
+                                  );
+                                  Navigator.pop(context);
+                                } catch (error) {
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text('Submit failed: $error')),
+                                  );
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isSubmitting = false);
+                                  }
+                                }
+                              },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF014A8D),
                           foregroundColor: Colors.white,
@@ -200,10 +259,16 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 18),
                         ),
-                        child: const Text(
-                          'Submit Credential',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text(
+                                'Submit Credential',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
                       ),
                     ),
                   ],
@@ -214,6 +279,23 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
         ),
       ),
     );
+  }
+
+  String _mapCredentialType(String type) {
+    switch (type) {
+      case 'Resume':
+        return 'resume';
+      case 'PRC License':
+        return 'prc';
+      case 'Seminar / Training':
+        return 'seminars';
+      case 'Academic Degree':
+        return 'degrees';
+      case 'Ranking File':
+        return 'ranking';
+      default:
+        return 'resume';
+    }
   }
 
   InputDecoration _inputDecoration() {

@@ -1,0 +1,8 @@
+{
+  "files.exclude": {
+    "backend": true
+  },
+  "search.exclude": {
+    "backend": true
+  }
+}

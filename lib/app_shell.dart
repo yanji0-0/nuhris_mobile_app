@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app.dart';
 import 'screens/auth/sign_in_screen.dart';
+import 'services/api_client.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -10,13 +11,24 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  bool isLoggedIn = false;
+  bool isLoggedIn = ApiClient.instance.isAuthenticated;
 
-  void _handleSignIn() {
-    setState(() => isLoggedIn = true);
+  Future<String?> _handleSignIn(String email, String password) async {
+    try {
+      await ApiClient.instance.login(email: email, password: password);
+      if (mounted) {
+        setState(() => isLoggedIn = true);
+      }
+      return null;
+    } on ApiException catch (error) {
+      return error.message;
+    } catch (_) {
+      return 'Unable to sign in right now. Please try again.';
+    }
   }
 
   void _handleSignOut() {
+    ApiClient.instance.logout();
     setState(() => isLoggedIn = false);
   }
 

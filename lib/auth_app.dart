@@ -8,7 +8,7 @@ class NuhrisAuthApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: SignInScreen(onSignIn: () {}),
+      home: SignInScreen(onSignIn: (email, password) async => null),
     );
   }
 }

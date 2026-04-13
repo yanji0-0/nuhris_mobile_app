@@ -8,7 +8,7 @@ class SignInScreen extends StatefulWidget {
     required this.onSignIn,
   });
 
-  final VoidCallback onSignIn;
+  final Future<String?> Function(String email, String password) onSignIn;
 
   @override
   State<SignInScreen> createState() => _SignInScreenState();
@@ -17,6 +17,7 @@ class SignInScreen extends StatefulWidget {
 class _SignInScreenState extends State<SignInScreen> {
   final emailCtrl = TextEditingController();
   final passCtrl = TextEditingController();
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
@@ -137,13 +138,45 @@ class _SignInScreenState extends State<SignInScreen> {
                           width: double.infinity,
                           height: 48,
                           child: ElevatedButton(
-                            onPressed: widget.onSignIn,
+                            onPressed: _isSubmitting
+                                ? null
+                                : () async {
+                                    final email = emailCtrl.text.trim();
+                                    final password = passCtrl.text;
+                                    final messenger = ScaffoldMessenger.of(context);
+
+                                    if (email.isEmpty || password.isEmpty) {
+                                      messenger.showSnackBar(
+                                        const SnackBar(content: Text('Please enter your email and password.')),
+                                      );
+                                      return;
+                                    }
+
+                                    setState(() => _isSubmitting = true);
+                                    final error = await widget.onSignIn(email, password);
+                                    if (!mounted) {
+                                      return;
+                                    }
+                                    setState(() => _isSubmitting = false);
+
+                                    if (error != null) {
+                                      messenger.showSnackBar(
+                                        SnackBar(content: Text(error)),
+                                      );
+                                    }
+                                  },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF070C4A),
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            child: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.w700)),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Text('Sign In', style: TextStyle(fontWeight: FontWeight.w700)),
                           ),
                         ),
                         const SizedBox(height: 16),

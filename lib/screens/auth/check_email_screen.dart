@@ -72,7 +72,7 @@ class CheckEmailScreen extends StatelessWidget {
                         Navigator.pushAndRemoveUntil(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => SignInScreen(onSignIn: () {}),
+                            builder: (_) => SignInScreen(onSignIn: (email, password) async => null),
                           ),
                           (route) => false,
                         );

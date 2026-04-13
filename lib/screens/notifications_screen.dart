@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../navigation/app_nav.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
@@ -19,44 +20,59 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   String selectedTab = 'All';
+  List<_NotifItem> items = const [];
+  bool _isLoading = true;
+  String? _error;
 
-  final List<String> tabs = const ['All', 'Credentials', 'CHED', 'HR', 'DTR', 'General'];
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
 
-  final List<_NotifItem> items = const [
-    _NotifItem(
-      category: 'Credentials',
-      title: 'PRC License Renewal\nReminder',
-      message: 'Your PRC license is expiring in 60 days.\nPlease upload your renewed license before\nApril 15, 2026.',
-      dateText: 'Feb 12, 2026 at 5:35 PM',
-      priority: 'high',
-      priorityColor: Color(0xFFF4CD67),
-      priorityTextColor: Color(0xFFB45309),
-      icon: Icons.campaign_outlined,
-      iconColor: Color(0xFFE06B10),
-    ),
-    _NotifItem(
-      category: 'DTR',
-      title: 'DTR Released:\nJanuary 16-31',
-      message: 'Your Daily Time Record for the period\nJanuary 16-31, 2026 is now available for\nviewing.',
-      dateText: 'Feb 12, 2026 at 5:35 PM',
-      priority: 'medium',
-      priorityColor: Color(0xFF66B6FF),
-      priorityTextColor: Color(0xFF0B4C8C),
-      icon: Icons.campaign_outlined,
-      iconColor: Color(0xFF2EA44F),
-    ),
-    _NotifItem(
-      category: 'HR',
-      title: 'New Leave Policy\nUpdate',
-      message: 'Effective this semester, emergency leave\nentitlement has been increased from 3 to 5\ndays per academic year.',
-      dateText: 'Feb 12, 2026 at 5:35 PM',
-      priority: 'medium',
-      priorityColor: Color(0xFF66B6FF),
-      priorityTextColor: Color(0xFF0B4C8C),
-      icon: Icons.campaign_outlined,
-      iconColor: Color(0xFF6F42C1),
-    ),
-  ];
+  Future<void> _loadNotifications() async {
+    try {
+      final rows = await ApiClient.instance.getNotifications();
+      final mapped = rows.map((row) {
+        final announcement = (row['announcement'] as Map?)?.cast<String, dynamic>() ?? {};
+        final priority = (announcement['priority'] ?? 'low').toString();
+        final category = (announcement['target_office'] ?? 'General').toString();
+        return _NotifItem(
+          category: category,
+          title: (announcement['title'] ?? 'Notification').toString(),
+          message: (announcement['content'] ?? 'No details provided.').toString(),
+          dateText: (announcement['published_at'] ?? row['created_at'] ?? '').toString(),
+          priority: priority,
+          priorityColor: _priorityColor(priority),
+          priorityTextColor: _priorityTextColor(priority),
+          icon: Icons.campaign_outlined,
+          iconColor: AppColors.primaryBlue,
+        );
+      }).toList();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        items = mapped;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  List<String> get tabs {
+    final categories = items.map((e) => e.category).toSet().toList()..sort();
+    return ['All', ...categories];
+  }
 
   List<_NotifItem> get filtered {
     if (selectedTab == 'All') return items;
@@ -94,6 +110,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             child: Text('Stay updated with credential reminders, HR\nannouncements, and compliance alerts.', style: TextStyle(color: AppColors.mutedText, fontSize: 15, height: 1.25)),
           ),
           const SizedBox(height: 14),
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.only(top: 60),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 60),
+              child: Center(child: Text('Failed to load notifications: $_error')),
+            )
+          else ...[
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(color: const Color(0xFFADADAD), borderRadius: BorderRadius.circular(8)),
@@ -127,9 +154,32 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             )
           else
             ...list.map((n) => Padding(padding: const EdgeInsets.only(bottom: 12), child: _NotificationCard(item: n))),
+          ],
         ],
       ),
     );
+  }
+
+  Color _priorityColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return const Color(0xFFF4CD67);
+      case 'medium':
+        return const Color(0xFF66B6FF);
+      default:
+        return const Color(0xFFD1FAE5);
+    }
+  }
+
+  Color _priorityTextColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return const Color(0xFFB45309);
+      case 'medium':
+        return const Color(0xFF0B4C8C);
+      default:
+        return const Color(0xFF065F46);
+    }
   }
 }
 

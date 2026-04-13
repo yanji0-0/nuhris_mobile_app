@@ -5,6 +5,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../navigation/app_nav.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
@@ -24,6 +25,10 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   String? employeeType;
+  String _displayName = 'Employee';
+  String _displayEmail = '';
+  bool _isLoading = true;
+  bool _isSaving = false;
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _profilePhoto;
 
@@ -34,11 +39,17 @@ class _AccountScreenState extends State<AccountScreen> {
   final _dateHiredCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
 
-  final List<String> employeeTypes = const [
-    'Faculty',
-    'Security',
-    'ASP',
+  final List<_EmployeeTypeOption> employeeTypes = const [
+    _EmployeeTypeOption(value: 'Faculty', label: 'Faculty'),
+    _EmployeeTypeOption(value: 'Security', label: 'Security'),
+    _EmployeeTypeOption(value: 'ASP', label: 'Admin Support Personel'),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccount();
+  }
 
   @override
   void dispose() {
@@ -49,6 +60,36 @@ class _AccountScreenState extends State<AccountScreen> {
     _dateHiredCtrl.dispose();
     _addressCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAccount() async {
+    try {
+      final payload = await ApiClient.instance.getAccount();
+      final user = (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
+      final employee =
+          (payload['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+      final department =
+          (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
+
+      _displayName = (user['name'] ?? 'Employee').toString();
+      _displayEmail = (user['email'] ?? '').toString();
+
+      _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
+      _departmentCtrl.text = (department['name'] ?? '').toString();
+      _positionCtrl.text = (employee['position'] ?? '').toString();
+      _phoneCtrl.text = (employee['phone'] ?? '').toString();
+      _dateHiredCtrl.text = _formatDate(
+        (employee['hire_date'] ?? '').toString(),
+      );
+      _addressCtrl.text = (employee['address'] ?? '').toString();
+      employeeType = _normalizeEmployeeType(employee['employment_type']);
+    } catch (_) {
+      // Keep empty fallback values if request fails.
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Future<void> _pickDateHired() async {
@@ -84,10 +125,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   children: [
                     Padding(
                       padding: EdgeInsets.all(4.0),
-                      child: Icon(
-                        Icons.camera,
-                        color: AppColors.primaryBlue,
-                      ),
+                      child: Icon(Icons.camera, color: AppColors.primaryBlue),
                     ),
                     Text(
                       'Camera',
@@ -105,10 +143,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   children: [
                     Padding(
                       padding: EdgeInsets.all(4.0),
-                      child: Icon(
-                        Icons.image,
-                        color: AppColors.primaryBlue,
-                      ),
+                      child: Icon(Icons.image, color: AppColors.primaryBlue),
                     ),
                     Text(
                       'Gallery',
@@ -198,6 +233,27 @@ class _AccountScreenState extends State<AccountScreen> {
     );
   }
 
+  String? _normalizeEmployeeType(dynamic value) {
+    final normalizedValue = value?.toString().trim();
+    if (normalizedValue == null || normalizedValue.isEmpty) {
+      return null;
+    }
+
+    for (final option in employeeTypes) {
+      if (normalizedValue == option.value ||
+          normalizedValue.toLowerCase() == option.label.toLowerCase()) {
+        return option.value;
+      }
+    }
+
+    if (normalizedValue.toLowerCase() == 'admin support personel' ||
+        normalizedValue.toLowerCase() == 'admin support personnel') {
+      return 'ASP';
+    }
+
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -222,15 +278,25 @@ class _AccountScreenState extends State<AccountScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(8, 14, 8, 18),
         children: [
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Column(
               children: [
                 Container(
                   height: 72,
                   decoration: const BoxDecoration(
                     color: AppColors.navy,
-                    borderRadius: BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(14),
+                      topRight: Radius.circular(14),
+                    ),
                   ),
                 ),
                 Transform.translate(
@@ -247,8 +313,16 @@ class _AccountScreenState extends State<AccountScreen> {
                               child: CircleAvatar(
                                 radius: 31,
                                 backgroundColor: const Color(0xFFE9EEF3),
-                                backgroundImage: _profilePhoto != null ? FileImage(File(_profilePhoto!.path)) : null,
-                                child: _profilePhoto == null ? const Icon(Icons.person, size: 38, color: Color(0xFF7B8794)) : null,
+                                backgroundImage: _profilePhoto != null
+                                    ? FileImage(File(_profilePhoto!.path))
+                                    : null,
+                                child: _profilePhoto == null
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 38,
+                                        color: Color(0xFF7B8794),
+                                      )
+                                    : null,
                               ),
                             ),
                             Positioned(
@@ -256,17 +330,36 @@ class _AccountScreenState extends State<AccountScreen> {
                               bottom: 0,
                               child: Container(
                                 padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(color: AppColors.primaryBlue, shape: BoxShape.circle),
-                                child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.primaryBlue,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text('Ian Isaac Martinez', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 24)),
+                      Text(
+                        _displayName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 24,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      const Text('martinezian@gmail.com', style: TextStyle(color: AppColors.mutedText, fontSize: 12)),
+                      Text(
+                        _displayEmail,
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -276,55 +369,136 @@ class _AccountScreenState extends State<AccountScreen> {
           ),
           const SizedBox(height: 10),
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Profile Information', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+                  const Text(
+                    'Profile Information',
+                    style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+                  ),
                   const SizedBox(height: 14),
                   const _FieldLabel('Employee Type'),
                   DropdownButtonFormField<String>(
                     initialValue: employeeType,
                     isExpanded: true,
                     decoration: _inputDecoration(hintText: 'Select type'),
-                    items: employeeTypes.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    items: employeeTypes
+                        .map(
+                          (option) => DropdownMenuItem(
+                            value: option.value,
+                            child: Text(option.label),
+                          ),
+                        )
+                        .toList(),
                     onChanged: (v) => setState(() => employeeType = v),
                   ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Employee ID'),
-                  TextField(controller: _employeeIdCtrl, decoration: _inputDecoration(hintText: 'e.g., NU-2025-001')),
+                  TextField(
+                    controller: _employeeIdCtrl,
+                    decoration: _inputDecoration(hintText: 'e.g., NU-2025-001'),
+                  ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Department'),
-                  TextField(controller: _departmentCtrl, decoration: _inputDecoration(hintText: 'e.g., SACE')),
+                  TextField(
+                    controller: _departmentCtrl,
+                    decoration: _inputDecoration(hintText: 'e.g., SACE'),
+                  ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Position'),
-                  TextField(controller: _positionCtrl, decoration: _inputDecoration(hintText: 'e.g., Instructor I')),
+                  TextField(
+                    controller: _positionCtrl,
+                    decoration: _inputDecoration(
+                      hintText: 'e.g., Instructor I',
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Phone'),
-                  TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: _inputDecoration(hintText: 'e.g., 09171234567')),
+                  TextField(
+                    controller: _phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: _inputDecoration(hintText: 'e.g., 09171234567'),
+                  ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Date Hired'),
-                  TextField(controller: _dateHiredCtrl, readOnly: true, onTap: _pickDateHired, decoration: _inputDecoration(hintText: 'mm/dd/yyyy')),
+                  TextField(
+                    controller: _dateHiredCtrl,
+                    readOnly: true,
+                    onTap: _pickDateHired,
+                    decoration: _inputDecoration(hintText: 'mm/dd/yyyy'),
+                  ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Address'),
-                  TextField(controller: _addressCtrl, decoration: _inputDecoration(hintText: 'Home Address')),
+                  TextField(
+                    controller: _addressCtrl,
+                    decoration: _inputDecoration(hintText: 'Home Address'),
+                  ),
                   const SizedBox(height: 16),
                   SizedBox(
                     height: 40,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved (UI only)')));
-                      },
+                      onPressed: _isSaving
+                          ? null
+                          : () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              setState(() => _isSaving = true);
+                              try {
+                                await ApiClient.instance.updateAccount({
+                                  'phone': _phoneCtrl.text.trim(),
+                                  'address': _addressCtrl.text.trim(),
+                                  if (employeeType != null)
+                                    'employment_type': employeeType,
+                                });
+                                if (mounted) {
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Account updated successfully.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              } catch (error) {
+                                if (mounted) {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Save failed: $error'),
+                                    ),
+                                  );
+                                }
+                              } finally {
+                                if (mounted) {
+                                  setState(() => _isSaving = false);
+                                }
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF014A8D),
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                       ),
-                      icon: const Icon(Icons.save_outlined, size: 18),
-                      label: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w700)),
+                      icon: _isSaving
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.save_outlined, size: 18),
+                      label: Text(
+                        _isSaving ? 'Saving...' : 'Save Changes',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ),
                 ],
@@ -335,6 +509,24 @@ class _AccountScreenState extends State<AccountScreen> {
       ),
     );
   }
+
+  String _formatDate(String value) {
+    if (value.length < 10) {
+      return value;
+    }
+    final date = value.substring(0, 10).split('-');
+    if (date.length != 3) {
+      return value;
+    }
+    return '${date[1]}/${date[2]}/${date[0]}';
+  }
+}
+
+class _EmployeeTypeOption {
+  const _EmployeeTypeOption({required this.value, required this.label});
+
+  final String value;
+  final String label;
 }
 
 class _FieldLabel extends StatelessWidget {

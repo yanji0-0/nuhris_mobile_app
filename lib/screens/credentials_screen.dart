@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../navigation/app_nav.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import 'credential_upload_screen.dart';
@@ -20,6 +21,9 @@ class CredentialsScreen extends StatefulWidget {
 
 class _CredentialsScreenState extends State<CredentialsScreen> {
   int selectedTab = 0;
+  bool _isLoading = true;
+  String? _error;
+  List<Map<String, dynamic>> _credentials = const [];
 
   final tabs = const [
     'All',
@@ -29,6 +33,52 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     'Degrees',
     'Ranking',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCredentials();
+  }
+
+  Future<void> _loadCredentials() async {
+    try {
+      final data = await ApiClient.instance.getEmployeeCredentials();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _credentials = data;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredCredentials {
+    if (selectedTab == 0) {
+      return _credentials;
+    }
+
+    const tabToType = {
+      1: 'resume',
+      2: 'prc',
+      3: 'seminars',
+      4: 'degrees',
+      5: 'ranking',
+    };
+    final expectedType = tabToType[selectedTab];
+    if (expectedType == null) {
+      return _credentials;
+    }
+    return _credentials.where((item) => (item['credential_type'] ?? '').toString() == expectedType).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +126,10 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => CredentialUploadScreen(onNavigate: widget.onNavigate),
+                      builder: (_) => CredentialUploadScreen(
+                        onNavigate: widget.onNavigate,
+                        onSubmitted: _loadCredentials,
+                      ),
                     ),
                   );
                 },
@@ -122,16 +175,34 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
             ),
             const SizedBox(height: 28),
             Expanded(
-              child: Center(
-                child: Text(
-                  'No credentials found. Upload\nyour first credential above',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(child: Text('Failed to load credentials: $_error'))
+                      : _filteredCredentials.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No credentials found. Upload\nyour first credential above',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.25),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: _filteredCredentials.length,
+                              itemBuilder: (context, index) {
+                                final item = _filteredCredentials[index];
+                                return Card(
+                                  child: ListTile(
+                                    title: Text((item['title'] ?? 'Credential').toString()),
+                                    subtitle: Text((item['credential_type'] ?? '').toString()),
+                                    trailing: Text((item['status'] ?? 'pending').toString()),
+                                  ),
+                                );
+                              },
+                            ),
             ),
           ],
         ),
