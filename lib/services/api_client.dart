@@ -14,6 +14,38 @@ class ApiClient {
       _client.auth.currentSession != null || _fallbackAuthenticated;
   Map<String, dynamic>? get currentUser => _user;
 
+  static const int _employeeUserType = 3;
+  static const String _loginFailedMessage =
+      'These credentials do not match our records.';
+
+  Future<bool> hasEmployeeAccess() async {
+    if (!isAuthenticated) {
+      return false;
+    }
+
+    try {
+      final user = await _currentUserRow();
+      final userType = _parseUserType(user?['user_type']);
+      if (userType != _employeeUserType) {
+        await logout();
+        return false;
+      }
+
+      final employee = await _currentEmployee();
+      if (employee == null) {
+        await logout();
+        return false;
+      }
+
+      return true;
+    } catch (_) {
+      // Fall through and force logout for unresolved or invalid user records.
+    }
+
+    await logout();
+    return false;
+  }
+
   Future<void> login({required String email, required String password}) async {
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty || password.isEmpty) {
@@ -50,13 +82,36 @@ class ApiClient {
         throw ApiException('The provided credentials are incorrect.');
       }
 
+      final userType = _parseUserType(row['user_type']);
+      if (userType != _employeeUserType) {
+        throw ApiException(_loginFailedMessage);
+      }
+
       _fallbackAuthenticated = true;
       _user = row;
+
+      final employee = await _currentEmployee();
+      if (employee == null) {
+        await logout();
+        throw ApiException(_loginFailedMessage);
+      }
       return;
     }
 
     _fallbackAuthenticated = false;
     await _loadCurrentUserFromTable(normalizedEmail);
+
+    final currentUserType = _parseUserType(_user?['user_type']);
+    if (currentUserType != _employeeUserType) {
+      await logout();
+      throw ApiException(_loginFailedMessage);
+    }
+
+    final employee = await _currentEmployee();
+    if (employee == null) {
+      await logout();
+      throw ApiException(_loginFailedMessage);
+    }
   }
 
   Future<void> logout() async {
@@ -392,6 +447,13 @@ class ApiClient {
         .whereType<Map>()
         .map((e) => e.cast<String, dynamic>())
         .toList();
+  }
+
+  int? _parseUserType(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+    return int.tryParse(value?.toString() ?? '');
   }
 }
 

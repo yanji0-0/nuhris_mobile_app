@@ -11,11 +11,33 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  bool isLoggedIn = ApiClient.instance.isAuthenticated;
+  bool isLoggedIn = false;
+  bool _isInitializing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrapSession();
+  }
+
+  Future<void> _bootstrapSession() async {
+    final allowed = await ApiClient.instance.hasEmployeeAccess();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      isLoggedIn = allowed;
+      _isInitializing = false;
+    });
+  }
 
   Future<String?> _handleSignIn(String email, String password) async {
     try {
       await ApiClient.instance.login(email: email, password: password);
+      final allowed = await ApiClient.instance.hasEmployeeAccess();
+      if (!allowed) {
+        return 'These credentials do not match our records.';
+      }
       if (mounted) {
         setState(() => isLoggedIn = true);
       }
@@ -34,17 +56,20 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (!isLoggedIn) {
-      return MaterialApp(
+    if (_isInitializing) {
+      return const MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: SignInScreen(
-          onSignIn: _handleSignIn,
-        ),
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
 
-    return NuhrisEmployeeApp(
-      onSignOut: _handleSignOut,
-    );
+    if (!isLoggedIn) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: SignInScreen(onSignIn: _handleSignIn),
+      );
+    }
+
+    return NuhrisEmployeeApp(onSignOut: _handleSignOut);
   }
 }
