@@ -167,17 +167,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _MetricCard(data: metrics[index]),
               );
 
+              final complianceTitleSize =
+                  constraints.maxWidth >= 900 ? 36.0 : 28.0;
+
               final compliancePanel = Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Compliance Status',
                         style: TextStyle(
-                          fontSize: 22,
+                          color: Color(0xFF11284F),
+                          fontSize: complianceTitleSize,
                           fontWeight: FontWeight.w900,
+                          height: 1.0,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -185,21 +190,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         label: 'Compliant',
                         color: AppColors.green,
                         value: compliantCount.toInt().toString(),
-                        icon: Icons.check_circle_outline,
                       ),
                       const SizedBox(height: 10),
                       _StatusRow(
                         label: 'Expiring Soon',
                         color: AppColors.orange,
                         value: expiringSoonCount.toInt().toString(),
-                        icon: Icons.warning_amber_rounded,
                       ),
                       const SizedBox(height: 10),
                       _StatusRow(
                         label: 'Non-Compliant',
                         color: AppColors.red,
                         value: nonCompliantCount.toInt().toString(),
-                        icon: Icons.cancel_outlined,
                       ),
                     ],
                   ),
@@ -556,42 +558,39 @@ class _StatusRow extends StatelessWidget {
     required this.label,
     required this.color,
     required this.value,
-    required this.icon,
   });
   final String label;
   final Color color;
   final String value;
-  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: const Color(0xFFF0F3F8),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        border: Border.all(color: const Color(0xFFD1D9E6)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 10),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: const TextStyle(
+                color: Color(0xFF10264A),
+                fontWeight: FontWeight.w500,
+                fontSize: 16,
+              ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: color.withValues(alpha: 0.35)),
-            ),
-            child: Text(
-              value,
-              style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontSize: 36,
+              height: 1,
             ),
           ),
         ],

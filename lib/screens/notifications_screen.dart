@@ -112,21 +112,53 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 14, 12, 20),
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              'Stay updated with credential reminders, HR\nannouncements, and compliance alerts.',
-              style: TextStyle(
-                color: AppColors.mutedText,
-                fontSize: 15,
-                height: 1.25,
-              ),
-            ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFF6F8FC), Color(0xFFF1F4FA), Color(0xFFECEFF6)],
           ),
-          const SizedBox(height: 14),
+        ),
+        child: SafeArea(
+          top: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 22),
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8EEF8),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Icon(
+                      Icons.notifications_none_rounded,
+                      color: Color(0xFF2C5FC7),
+                      size: 34,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Stay updated with credential reminders, HR announcements, and compliance alerts.',
+                        style: TextStyle(
+                          color: Color(0xFF4B556A),
+                          fontSize: 16,
+                          height: 1.35,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.only(top: 60),
@@ -143,37 +175,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFADADAD),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE3E8F2)),
               ),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: tabs.map((t) {
+                  children: tabs.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final t = entry.value;
                     final isSelected = selectedTab == t;
+                    final count = _getTabCount(t);
                     return Padding(
-                      padding: const EdgeInsets.only(right: 6),
+                      padding: EdgeInsets.only(
+                        right: index == tabs.length - 1 ? 0 : 8,
+                      ),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(22),
                         onTap: () => setState(() => selectedTab = t),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
+                            horizontal: 16,
+                            vertical: 11,
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? const Color(0xFFE8E8E8)
+                                ? const Color(0xFF0A2E86)
                                 : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(22),
                           ),
                           child: Text(
-                            t,
+                            '$t ($count)',
                             style: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : const Color(0xFF58657A),
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
-                              color: Colors.black.withValues(alpha: 0.85),
                             ),
                           ),
                         ),
@@ -183,32 +223,46 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             if (list.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 120),
-                child: Center(
-                  child: Text(
-                    'No Notifications Found',
-                    style: TextStyle(
-                      fontSize: 25,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF454545),
-                    ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 30,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE6ECF6)),
+                ),
+                child: const Text(
+                  'No notifications found.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF92A0B5),
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
                   ),
                 ),
               )
             else
               ...list.map(
                 (n) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.only(bottom: 10),
                   child: _NotificationCard(item: n),
                 ),
               ),
-          ],
-        ],
+            ],
+            ],
+          ),
+        ),
       ),
     );
+  }
+
+  int _getTabCount(String tabName) {
+    if (tabName == 'All') return items.length;
+    return items.where((item) => item.category == tabName).length;
   }
 
   Color _priorityColor(String priority) {
@@ -238,99 +292,144 @@ class _NotificationCard extends StatelessWidget {
   const _NotificationCard({required this.item});
   final _NotifItem item;
 
+  Color _getIconBackground(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return const Color(0xFFFFECE2);
+      case 'medium':
+        return const Color(0xFFE1EFFF);
+      default:
+        return const Color(0xFFE2F9F0);
+    }
+  }
+
+  Color _getIconColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return const Color(0xFFFF9800);
+      case 'medium':
+        return const Color(0xFF2196F3);
+      default:
+        return const Color(0xFF4CAF50);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
+      margin: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: const Border(
-          left: BorderSide(color: AppColors.nuhrisYellow, width: 4),
-        ),
+        border: Border.all(color: const Color(0xFFE6ECF6)),
         boxShadow: const [
           BoxShadow(
-            blurRadius: 6,
-            color: Color(0x1A000000),
-            offset: Offset(0, 2),
+            color: Color(0x0B0B1E43),
+            blurRadius: 14,
+            offset: Offset(0, 6),
           ),
         ],
       ),
-      child: Card(
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(item.icon, color: item.iconColor, size: 18),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      item.title,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        height: 1.18,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: item.priorityColor,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: item.priorityTextColor.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Text(
-                      item.priority,
-                      style: TextStyle(
-                        color: item.priorityTextColor,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.only(left: 28),
-                child: Text(
-                  item.message,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF555555),
-                    height: 1.25,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.only(left: 28),
-                child: Text(
-                  item.dateText,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF9C9C9C),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _getIconBackground(item.priority),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              item.icon,
+              color: _getIconColor(item.priority),
+              size: 20,
+            ),
           ),
-        ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF141B2E),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: item.priorityColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        item.priority.toUpperCase(),
+                        style: TextStyle(
+                          color: item.priorityTextColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.message,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF2A324A),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_today_outlined,
+                      size: 14,
+                      color: Color(0xFF7B879C),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        item.dateText,
+                        style: const TextStyle(
+                          color: Color(0xFF4C5A73),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: Color(0xFF8A95A8),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

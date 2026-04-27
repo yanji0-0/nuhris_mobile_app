@@ -473,8 +473,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Container(
-                                width: 50,
-                                height: 50,
+                                width: 44,
+                                height: 44,
                                 decoration: BoxDecoration(
                                   color: typeStyle.background,
                                   shape: BoxShape.circle,
@@ -482,7 +482,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                 child: Icon(
                                   typeStyle.icon,
                                   color: typeStyle.foreground,
-                                  size: 24,
+                                  size: 20,
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -509,20 +509,20 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                         const SizedBox(width: 8),
                                         Container(
                                           padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
+                                            horizontal: 10,
+                                            vertical: 5,
                                           ),
                                           decoration: BoxDecoration(
                                             color: badgeStyle.background,
                                             borderRadius: BorderRadius.circular(
-                                              12,
+                                              10,
                                             ),
                                           ),
                                           child: Text(
                                             badgeStyle.label,
                                             style: TextStyle(
                                               color: badgeStyle.foreground,
-                                              fontSize: 12,
+                                              fontSize: 11,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
@@ -543,7 +543,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                       children: [
                                         const Icon(
                                           Icons.calendar_today_outlined,
-                                          size: 16,
+                                          size: 14,
                                           color: Color(0xFF7B879C),
                                         ),
                                         const SizedBox(width: 6),
@@ -560,7 +560,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                         const SizedBox(width: 4),
                                         const Icon(
                                           Icons.chevron_right_rounded,
-                                          size: 22,
+                                          size: 18,
                                           color: Color(0xFF8A95A8),
                                         ),
                                       ],

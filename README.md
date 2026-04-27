@@ -14,3 +14,8 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Git hooks
+
+This repo includes a local Git hook that strips the Copilot co-author trailer from commit messages.
+Run `git config core.hooksPath .githooks` once in this repository to enable it.

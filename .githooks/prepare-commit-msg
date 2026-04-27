@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+commit_msg_file="$1"
+
+if [ ! -f "$commit_msg_file" ]; then
+  exit 0
+fi
+
+tmp_file="$(mktemp)"
+
+trap 'rm -f "$tmp_file"' EXIT
+
+grep -v '^Co-authored-by: Copilot <copilot@github.com>$' "$commit_msg_file" > "$tmp_file"
+mv "$tmp_file" "$commit_msg_file"
