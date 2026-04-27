@@ -73,7 +73,7 @@ class _SignInScreenState extends State<SignInScreen> {
                     Image.asset(
                       'assets/images/login_background.jpg',
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      errorBuilder: (_, error, stackTrace) => Container(
                         decoration: const BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topLeft,
