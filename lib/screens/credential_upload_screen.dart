@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../navigation/app_nav.dart';
 import '../services/api_client.dart';
@@ -142,6 +141,12 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0A1B66),
+        foregroundColor: Colors.white,
+        surfaceTintColor: const Color(0xFF0A1B66),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         title: const Text('Credentials'),
         actions: [
           IconButton(
@@ -424,8 +429,11 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
                                           ?.cast<String, dynamic>() ??
                                       {};
                                   final employeeId = employee['id'];
+                                  final employeeAlternateId =
+                                      employee['employee_id'];
+                                  final credentialEmployeeId = employeeId;
 
-                                  if (employeeId == null) {
+                                  if (credentialEmployeeId == null) {
                                     throw Exception(
                                       'Employee profile not found for this account.',
                                     );
@@ -435,13 +443,15 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
                                       .instance
                                       .uploadEmployeeCredentialFile(
                                         employeeId: employeeId,
+                                        employeeAlternateId:
+                                            employeeAlternateId,
                                         fileBytes: _selectedFileBytes!,
                                         originalFileName: _selectedFile!.name,
                                       );
 
                                   await ApiClient.instance
                                       .createEmployeeCredential({
-                                        'employee_id': employeeId,
+                                        'employee_id': credentialEmployeeId,
                                         'credential_type': _mapCredentialType(
                                           _credentialType!,
                                         ),

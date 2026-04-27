@@ -46,7 +46,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(title: const Text('Dashboard')),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0A1B66),
+        foregroundColor: Colors.white,
+        surfaceTintColor: const Color(0xFF0A1B66),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        title: const Text('Dashboard'),
+      ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
@@ -103,11 +111,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               (notificationsSummary['total_count'] ?? notifications.length)
                   as num;
 
-            final firstName = (employee['first_name'] ?? '').toString().trim();
-            final lastName = (employee['last_name'] ?? '').toString().trim();
-            final combinedName = '$firstName $lastName'.trim();
-            final fallbackName = (employee['name'] ?? '').toString().trim();
-            final welcomeName = combinedName.isNotEmpty
+          final firstName = (employee['first_name'] ?? '').toString().trim();
+          final lastName = (employee['last_name'] ?? '').toString().trim();
+          final combinedName = '$firstName $lastName'.trim();
+          final fallbackName = (employee['name'] ?? '').toString().trim();
+          final welcomeName = combinedName.isNotEmpty
               ? combinedName
               : (fallbackName.isNotEmpty ? fallbackName : 'Employee');
 

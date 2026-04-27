@@ -29,6 +29,7 @@ class _AccountScreenState extends State<AccountScreen> {
   String _displayEmail = '';
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isChangingPassword = false;
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _profilePhoto;
 
@@ -38,6 +39,13 @@ class _AccountScreenState extends State<AccountScreen> {
   final _phoneCtrl = TextEditingController();
   final _dateHiredCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _currentPasswordCtrl = TextEditingController();
+  final _newPasswordCtrl = TextEditingController();
+  final _confirmPasswordCtrl = TextEditingController();
+
+  bool _obscureCurrentPassword = true;
+  bool _obscureNewPassword = true;
+  bool _obscureConfirmPassword = true;
 
   final List<_EmployeeTypeOption> employeeTypes = const [
     _EmployeeTypeOption(value: 'Faculty', label: 'Faculty'),
@@ -59,6 +67,9 @@ class _AccountScreenState extends State<AccountScreen> {
     _phoneCtrl.dispose();
     _dateHiredCtrl.dispose();
     _addressCtrl.dispose();
+    _currentPasswordCtrl.dispose();
+    _newPasswordCtrl.dispose();
+    _confirmPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -254,6 +265,70 @@ class _AccountScreenState extends State<AccountScreen> {
     return null;
   }
 
+  Future<void> _handleChangePassword() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final currentPassword = _currentPasswordCtrl.text;
+    final newPassword = _newPasswordCtrl.text;
+    final confirmPassword = _confirmPasswordCtrl.text;
+
+    if (currentPassword.trim().isEmpty ||
+        newPassword.trim().isEmpty ||
+        confirmPassword.trim().isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Please complete all password fields.')),
+      );
+      return;
+    }
+
+    if (newPassword.trim().length < 6) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('New password must be at least 6 characters long.'),
+        ),
+      );
+      return;
+    }
+
+    if (newPassword != confirmPassword) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('New password and confirm password do not match.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isChangingPassword = true);
+    try {
+      await ApiClient.instance.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      _currentPasswordCtrl.clear();
+      _newPasswordCtrl.clear();
+      _confirmPasswordCtrl.clear();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Password changed successfully.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('Change password failed: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isChangingPassword = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -266,6 +341,12 @@ class _AccountScreenState extends State<AccountScreen> {
         onSignOut: widget.onSignOut,
       ),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0A1B66),
+        foregroundColor: Colors.white,
+        surfaceTintColor: const Color(0xFF0A1B66),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         title: const Text('Account'),
         actions: [
           IconButton(
@@ -497,6 +578,130 @@ class _AccountScreenState extends State<AccountScreen> {
                           : const Icon(Icons.save_outlined, size: 18),
                       label: Text(
                         _isSaving ? 'Saving...' : 'Save Changes',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Change Password',
+                    style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Update your account password. Use your current password before setting a new one.',
+                    style: TextStyle(color: AppColors.mutedText, fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  const _FieldLabel('Current Password'),
+                  TextField(
+                    controller: _currentPasswordCtrl,
+                    obscureText: _obscureCurrentPassword,
+                    decoration:
+                        _inputDecoration(
+                          hintText: 'Enter current password',
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            onPressed: () {
+                              setState(
+                                () => _obscureCurrentPassword =
+                                    !_obscureCurrentPassword,
+                              );
+                            },
+                            icon: Icon(
+                              _obscureCurrentPassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  const _FieldLabel('New Password'),
+                  TextField(
+                    controller: _newPasswordCtrl,
+                    obscureText: _obscureNewPassword,
+                    decoration: _inputDecoration(hintText: 'Min 6 characters')
+                        .copyWith(
+                          suffixIcon: IconButton(
+                            onPressed: () {
+                              setState(
+                                () =>
+                                    _obscureNewPassword = !_obscureNewPassword,
+                              );
+                            },
+                            icon: Icon(
+                              _obscureNewPassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  const _FieldLabel('Confirm New Password'),
+                  TextField(
+                    controller: _confirmPasswordCtrl,
+                    obscureText: _obscureConfirmPassword,
+                    decoration:
+                        _inputDecoration(
+                          hintText: 'Re-enter new password',
+                        ).copyWith(
+                          suffixIcon: IconButton(
+                            onPressed: () {
+                              setState(
+                                () => _obscureConfirmPassword =
+                                    !_obscureConfirmPassword,
+                              );
+                            },
+                            icon: Icon(
+                              _obscureConfirmPassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      onPressed: _isChangingPassword
+                          ? null
+                          : _handleChangePassword,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF014A8D),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      icon: _isChangingPassword
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.lock_reset, size: 18),
+                      label: Text(
+                        _isChangingPassword ? 'Changing...' : 'Change Password',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ),

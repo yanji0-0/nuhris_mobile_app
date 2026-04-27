@@ -19,6 +19,7 @@ class ApiClient {
   static const String _loginFailedMessage =
       'These credentials do not match our records.';
   static const List<String> _credentialFilesBuckets = [
+    'CREDENTIALS',
     'employee_credentials',
     'employee-credentials',
     'credentials',
@@ -55,6 +56,7 @@ class ApiClient {
 
   Future<void> login({required String email, required String password}) async {
     final normalizedEmail = email.trim().toLowerCase();
+
     if (normalizedEmail.isEmpty || password.isEmpty) {
       throw ApiException('Email and password are required.');
     }
@@ -154,10 +156,11 @@ class ApiClient {
         .select('id,status')
         .eq('employee_id', employeeId);
 
-    final credentialRows = await _client
-        .from('employee_credentials')
-        .select('id,status,expires_at')
-        .eq('employee_id', employeeId);
+    final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
+    final credentialRows = await _queryEmployeeCredentials(
+      select: 'id,status,expires_at',
+      employeeIdentifiers: credentialIdentifiers,
+    );
 
     final user = await _currentUserRow();
     final userId = user?['id'];
@@ -186,14 +189,6 @@ class ApiClient {
         .where((row) => (row['status'] ?? '').toString() == 'pending')
         .length;
 
-    final activeStatuses = <String>{
-      'active',
-      'verified',
-      'approved',
-      'compliant',
-      'valid',
-    };
-
     final nonCompliantStatuses = <String>{
       'expired',
       'rejected',
@@ -204,7 +199,10 @@ class ApiClient {
 
     final activeCredentials = credentialRows.whereType<Map>().where((row) {
       final status = (row['status'] ?? '').toString().trim().toLowerCase();
-      return activeStatuses.contains(status);
+      if (status.isEmpty) {
+        return true;
+      }
+      return !nonCompliantStatuses.contains(status);
     }).length;
 
     final nonCompliantCredentials = credentialRows.whereType<Map>().where((
@@ -424,19 +422,93 @@ class ApiClient {
     return {'message': 'Account updated successfully.', ...refreshed};
   }
 
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final current = currentPassword.trim();
+    final next = newPassword.trim();
+
+    if (current.isEmpty || next.isEmpty) {
+      throw ApiException('Current and new passwords are required.');
+    }
+
+    if (next.length < 6) {
+      throw ApiException('New password must be at least 6 characters long.');
+    }
+
+    final user = await _currentUserRow();
+    final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
+        .toString()
+        .trim();
+    if (email.isEmpty) {
+      throw ApiException(
+        'Unable to resolve account email for password change.',
+      );
+    }
+
+    if (_client.auth.currentSession != null) {
+      try {
+        await _client.auth.signInWithPassword(email: email, password: current);
+      } catch (_) {
+        throw ApiException('Current password is incorrect.');
+      }
+
+      try {
+        await _client.auth.updateUser(UserAttributes(password: next));
+        return;
+      } on AuthException catch (error) {
+        throw ApiException('Password update failed: ${error.message}');
+      }
+    }
+
+    if (!_fallbackAuthenticated) {
+      throw ApiException('You are not signed in. Please sign in again.');
+    }
+
+    final rows = await _client
+        .from('users')
+        .select('id,password,must_change_password')
+        .ilike('email', email)
+        .limit(1);
+
+    if (rows.isEmpty) {
+      throw ApiException('Account record not found for password change.');
+    }
+
+    final row = (rows.first as Map).cast<String, dynamic>();
+    final storedPassword = (row['password'] ?? '').toString();
+    final isBcrypt = storedPassword.startsWith(r'$2');
+    final isValid = isBcrypt
+        ? BCrypt.checkpw(current, storedPassword)
+        : current == storedPassword;
+
+    if (!isValid) {
+      throw ApiException('Current password is incorrect.');
+    }
+
+    final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
+    await _client
+        .from('users')
+        .update({'password': hashedPassword, 'must_change_password': false})
+        .eq('id', row['id']);
+
+    await _loadCurrentUserFromTable(email);
+  }
+
   Future<List<Map<String, dynamic>>> getEmployeeCredentials() async {
     final employee = await _currentEmployee();
     if (employee == null || employee['id'] == null) {
       throw ApiException('Employee profile not found.');
     }
 
-    final rows = await _client
-        .from('employee_credentials')
-        .select(
+    final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
+    final rows = await _queryEmployeeCredentials(
+      select:
           'id,employee_id,credential_type,title,department_id,expires_at,description,file_path,status,created_at,updated_at',
-        )
-        .eq('employee_id', employee['id'])
-        .order('created_at', ascending: false);
+      employeeIdentifiers: credentialIdentifiers,
+      orderByCreatedAtDesc: true,
+    );
 
     return _toMapList(rows);
   }
@@ -444,17 +516,68 @@ class ApiClient {
   Future<Map<String, dynamic>> createEmployeeCredential(
     Map<String, dynamic> payload,
   ) async {
-    final rows = await _client
-        .from('employee_credentials')
-        .insert(payload)
-        .select();
+    Future<Map<String, dynamic>> insertWithPayload(
+      Map<String, dynamic> insertPayload,
+    ) async {
+      await _client.from('employee_credentials').insert(insertPayload);
+      return Map<String, dynamic>.from(insertPayload);
+    }
 
-    final list = _toMapList(rows);
-    return list.isNotEmpty ? list.first : <String, dynamic>{};
+    try {
+      return await insertWithPayload(payload);
+    } on PostgrestException catch (error) {
+      final message = error.message.toLowerCase();
+      final isPolicyDenied =
+          error.code == '42501' || message.contains('row-level security');
+      if (!isPolicyDenied) {
+        rethrow;
+      }
+
+      final employee = await _currentEmployee();
+      final attempted = (payload['employee_id'] ?? '').toString().trim();
+      final fallbackIds = <dynamic>[];
+      final seen = <String>{attempted};
+
+      void addFallback(dynamic value) {
+        if (value == null) {
+          return;
+        }
+        final text = value.toString().trim();
+        if (text.isEmpty || seen.contains(text)) {
+          return;
+        }
+        seen.add(text);
+        fallbackIds.add(value);
+      }
+
+      addFallback(employee?['employee_id']);
+      addFallback(employee?['id']);
+
+      for (final fallbackId in fallbackIds) {
+        final fallbackPayload = Map<String, dynamic>.from(payload)
+          ..['employee_id'] = fallbackId;
+        try {
+          return await insertWithPayload(fallbackPayload);
+        } on PostgrestException catch (fallbackError) {
+          final fallbackMessage = fallbackError.message.toLowerCase();
+          final stillPolicyDenied =
+              fallbackError.code == '42501' ||
+              fallbackMessage.contains('row-level security');
+          if (!stillPolicyDenied) {
+            rethrow;
+          }
+        }
+      }
+
+      throw ApiException(
+        'Credential insert failed: ${error.message}. The row was blocked by RLS on employee_credentials.',
+      );
+    }
   }
 
   Future<String> uploadEmployeeCredentialFile({
     required dynamic employeeId,
+    dynamic employeeAlternateId,
     required Uint8List fileBytes,
     required String originalFileName,
   }) async {
@@ -470,6 +593,10 @@ class ApiClient {
     final candidatePrefixes = <String>{
       'employee-$employeeId',
       'employee_$employeeId',
+      if (employeeAlternateId != null)
+        'employee-${employeeAlternateId.toString().trim()}',
+      if (employeeAlternateId != null)
+        'employee_${employeeAlternateId.toString().trim()}',
       if (authUid.isNotEmpty) authUid,
       if (userId.isNotEmpty) 'user-$userId',
       if (userId.isNotEmpty) userId,
@@ -482,7 +609,7 @@ class ApiClient {
 
     for (final bucket in _credentialFilesBuckets) {
       for (final prefix in candidatePrefixes) {
-        final filePath = '$prefix/$timestamp\_$safeName';
+        final filePath = '$prefix/${timestamp}_$safeName';
         try {
           await _client.storage
               .from(bucket)
@@ -654,6 +781,54 @@ class ApiClient {
       return value;
     }
     return int.tryParse(value?.toString() ?? '');
+  }
+
+  List<dynamic> _employeeCredentialIdentifiers(Map<String, dynamic> employee) {
+    final identifiers = <dynamic>[];
+    final seen = <String>{};
+
+    void addIdentifier(dynamic value) {
+      if (value == null) {
+        return;
+      }
+      final text = value.toString().trim();
+      if (text.isEmpty || !seen.add(text)) {
+        return;
+      }
+      identifiers.add(value);
+    }
+
+    // employee_credentials.employee_id has a FK to employees.id,
+    // so reads should primarily use the same key used by inserts.
+    addIdentifier(employee['id']);
+    if (identifiers.isEmpty) {
+      addIdentifier(employee['employee_id']);
+    }
+    return identifiers;
+  }
+
+  Future<dynamic> _queryEmployeeCredentials({
+    required String select,
+    required List<dynamic> employeeIdentifiers,
+    bool orderByCreatedAtDesc = false,
+  }) async {
+    if (employeeIdentifiers.isEmpty) {
+      return const [];
+    }
+
+    dynamic query = _client.from('employee_credentials').select(select);
+
+    if (employeeIdentifiers.length == 1) {
+      query = query.eq('employee_id', employeeIdentifiers.first);
+    } else {
+      query = query.inFilter('employee_id', employeeIdentifiers);
+    }
+
+    if (orderByCreatedAtDesc) {
+      query = query.order('created_at', ascending: false);
+    }
+
+    return query;
   }
 }
 

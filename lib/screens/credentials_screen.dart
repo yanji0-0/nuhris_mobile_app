@@ -77,7 +77,68 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     if (expectedType == null) {
       return _credentials;
     }
-    return _credentials.where((item) => (item['credential_type'] ?? '').toString() == expectedType).toList();
+    return _credentials.where((item) {
+      final rawType = (item['credential_type'] ?? '').toString();
+      return _normalizeCredentialType(rawType) == expectedType;
+    }).toList();
+  }
+
+  String _normalizeCredentialType(String rawType) {
+    final value = rawType.trim().toLowerCase();
+    if (value.contains('resume')) {
+      return 'resume';
+    }
+    if (value == 'prc' || value.contains('prc license')) {
+      return 'prc';
+    }
+    if (value.contains('seminar') || value.contains('training')) {
+      return 'seminars';
+    }
+    if (value.contains('degree') || value.contains('academic')) {
+      return 'degrees';
+    }
+    if (value.contains('ranking')) {
+      return 'ranking';
+    }
+    return value;
+  }
+
+  _StatusBadgeStyle _statusBadgeStyle(String rawStatus) {
+    final status = rawStatus.trim().toLowerCase();
+
+    if (status == 'pending') {
+      return const _StatusBadgeStyle(
+        label: 'Pending',
+        background: Color(0xFFFCECC2),
+        foreground: Color(0xFF9A6A00),
+      );
+    }
+
+    if (status == 'verified' ||
+        status == 'approved' ||
+        status == 'active' ||
+        status == 'compliant' ||
+        status == 'valid') {
+      return const _StatusBadgeStyle(
+        label: 'Approved',
+        background: Color(0xFFDDF5E3),
+        foreground: Color(0xFF2E8B57),
+      );
+    }
+
+    if (status == 'expired' || status == 'rejected' || status == 'invalid') {
+      return const _StatusBadgeStyle(
+        label: 'Rejected',
+        background: Color(0xFFFADADD),
+        foreground: Color(0xFFB3261E),
+      );
+    }
+
+    return _StatusBadgeStyle(
+      label: rawStatus.trim().isEmpty ? 'Pending' : rawStatus,
+      background: const Color(0xFFE8EBF0),
+      foreground: const Color(0xFF4B5563),
+    );
   }
 
   @override
@@ -92,13 +153,19 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         onSignOut: widget.onSignOut,
       ),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0A1B66),
+        foregroundColor: Colors.white,
+        surfaceTintColor: const Color(0xFF0A1B66),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         title: const Text('Credentials'),
         actions: [
           IconButton(
             onPressed: () => widget.onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
             tooltip: 'Notifications',
-          )
+          ),
         ],
       ),
       body: Padding(
@@ -116,11 +183,16 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
               height: 44,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('Upload New', style: TextStyle(fontWeight: FontWeight.w800)),
+                label: const Text(
+                  'Upload New',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2B2F36),
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 onPressed: () {
                   Navigator.push(
@@ -153,9 +225,14 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                         borderRadius: BorderRadius.circular(10),
                         onTap: () => setState(() => selectedTab = i),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
-                            color: selected ? const Color(0xFFE6E6E6) : Colors.transparent,
+                            color: selected
+                                ? const Color(0xFFE6E6E6)
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -178,35 +255,71 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                      ? Center(child: Text('Failed to load credentials: $_error'))
-                      : _filteredCredentials.isEmpty
-                          ? Center(
+                  ? Center(child: Text('Failed to load credentials: $_error'))
+                  : _filteredCredentials.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No credentials found. Upload\nyour first credential above',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _filteredCredentials.length,
+                      itemBuilder: (context, index) {
+                        final item = _filteredCredentials[index];
+                        final rawStatus = (item['status'] ?? 'pending')
+                            .toString();
+                        final badgeStyle = _statusBadgeStyle(rawStatus);
+                        return Card(
+                          child: ListTile(
+                            title: Text(
+                              (item['title'] ?? 'Credential').toString(),
+                            ),
+                            subtitle: Text(
+                              (item['credential_type'] ?? '').toString(),
+                            ),
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: badgeStyle.background,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
                               child: Text(
-                                'No credentials found. Upload\nyour first credential above',
-                                textAlign: TextAlign.center,
+                                badgeStyle.label,
                                 style: TextStyle(
-                                  color: Colors.black.withValues(alpha: 0.25),
+                                  color: badgeStyle.foreground,
+                                  fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
-                            )
-                          : ListView.builder(
-                              itemCount: _filteredCredentials.length,
-                              itemBuilder: (context, index) {
-                                final item = _filteredCredentials[index];
-                                return Card(
-                                  child: ListTile(
-                                    title: Text((item['title'] ?? 'Credential').toString()),
-                                    subtitle: Text((item['credential_type'] ?? '').toString()),
-                                    trailing: Text((item['status'] ?? 'pending').toString()),
-                                  ),
-                                );
-                              },
                             ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+class _StatusBadgeStyle {
+  const _StatusBadgeStyle({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
 }
