@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../navigation/app_nav.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/dashboard_calendar.dart';
-import '../widgets/section_title.dart';
-import '../widgets/summary_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -33,14 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<Map<String, dynamic>> _loadData() async {
     final dashboard = await ApiClient.instance.getDashboard();
     final notifications = await ApiClient.instance.getNotifications();
-    final supabaseProbe = await ApiClient.instance.getSupabaseHealth();
-    final supabaseSummary = await ApiClient.instance.getSupabaseSummary();
-    return {
-      'dashboard': dashboard,
-      'notifications': notifications,
-      'supabase_probe': supabaseProbe,
-      'supabase_summary': supabaseSummary,
-    };
+    return {'dashboard': dashboard, 'notifications': notifications};
   }
 
   @override
@@ -54,9 +46,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        title: const Text('Dashboard'),
-      ),
+      appBar: AppBar(title: const Text('Dashboard')),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
@@ -74,164 +64,492 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
 
           final payload = snapshot.data ?? {};
-          final dashboard = (payload['dashboard'] as Map?)?.cast<String, dynamic>() ?? {};
-          final notifications = ((payload['notifications'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList();
-          final supabaseProbe = (payload['supabase_probe'] as Map?)?.cast<String, dynamic>() ?? {};
-          final supabaseSummary = (payload['supabase_summary'] as Map?)?.cast<String, dynamic>() ?? {};
+          final dashboard =
+              (payload['dashboard'] as Map?)?.cast<String, dynamic>() ?? {};
+          final notifications =
+              ((payload['notifications'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => e.cast<String, dynamic>())
+                  .toList();
 
-          final employee = (dashboard['employee'] as Map?)?.cast<String, dynamic>() ?? {};
-          final attendanceSummary = (dashboard['attendance_summary'] as Map?)?.cast<String, dynamic>() ?? {};
-          final leaveSummary = (dashboard['leave_summary'] as Map?)?.cast<String, dynamic>() ?? {};
-          final supabaseConnected = supabaseProbe['connected'] == true;
-          final supabaseSubtitle = supabaseConnected
-              ? 'Table users, rows fetched: ${(supabaseProbe['row_count'] ?? 0).toString()}'
-              : (supabaseProbe['message'] ?? 'Unable to read users table').toString();
-          final supabaseCounts = (supabaseSummary['counts'] as Map?)?.cast<String, dynamic>() ?? {};
-          final activeCredentialsCount = (supabaseCounts['employee_credentials'] ?? 0).toString();
+          final employee =
+              (dashboard['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+          final leaveSummary =
+              (dashboard['leave_summary'] as Map?)?.cast<String, dynamic>() ??
+              {};
+          final credentialsSummary =
+              (dashboard['credentials_summary'] as Map?)
+                  ?.cast<String, dynamic>() ??
+              {};
+          final notificationsSummary =
+              (dashboard['notifications_summary'] as Map?)
+                  ?.cast<String, dynamic>() ??
+              {};
 
-          final welcomeName = (employee['first_name'] ?? '').toString().isEmpty
-              ? 'Employee'
-              : (employee['first_name']).toString();
+          final activeCredentialsCount =
+              (credentialsSummary['active_count'] ?? 0) as num;
+          final expiringSoonCount =
+              (credentialsSummary['expiring_soon_count'] ?? 0) as num;
+          final nonCompliantCount =
+              (credentialsSummary['non_compliant_count'] ?? 0) as num;
+          final compliantCount =
+              (credentialsSummary['compliant_count'] ?? activeCredentialsCount)
+                  as num;
+          final totalCredentialCount =
+              (credentialsSummary['total_count'] ?? 0) as num;
+          final totalLeaveDays =
+              ((leaveSummary['total_days_remaining'] ?? 0) as num).toDouble();
+          final totalNotifications =
+              (notificationsSummary['total_count'] ?? notifications.length)
+                  as num;
 
-          return ListView(
-            padding: const EdgeInsets.only(bottom: 18),
-            children: [
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Text('Welcome back, $welcomeName!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
-              ),
-              const SizedBox(height: 4),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: Text(
-                  'Here is an overview of your HR information.',
-                  style: TextStyle(color: AppColors.mutedText, fontSize: 12),
+            final firstName = (employee['first_name'] ?? '').toString().trim();
+            final lastName = (employee['last_name'] ?? '').toString().trim();
+            final combinedName = '$firstName $lastName'.trim();
+            final fallbackName = (employee['name'] ?? '').toString().trim();
+            final welcomeName = combinedName.isNotEmpty
+              ? combinedName
+              : (fallbackName.isNotEmpty ? fallbackName : 'Employee');
+
+          final complianceValue =
+              '${compliantCount.toInt()}/${totalCredentialCount.toInt()}';
+          final metrics = [
+            _MetricData(
+              title: 'Active Credentials',
+              value: activeCredentialsCount.toInt().toString(),
+              subtitle: '${expiringSoonCount.toInt()} pending review',
+            ),
+            _MetricData(
+              title: 'Compliance',
+              value: complianceValue,
+              subtitle: 'Up to date',
+            ),
+            _MetricData(
+              title: 'Leave Balance',
+              value: totalLeaveDays % 1 == 0
+                  ? totalLeaveDays.toInt().toString()
+                  : totalLeaveDays.toStringAsFixed(1),
+              subtitle: 'Total days remaining',
+            ),
+            _MetricData(
+              title: 'Notifications',
+              value: totalNotifications.toInt().toString(),
+              subtitle: 'Recent alerts',
+            ),
+          ];
+
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 1100;
+              final horizontalPad = isWide ? 22.0 : 14.0;
+
+              final metricsGrid = GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: metrics.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: isWide ? 4 : 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: isWide
+                      ? 2.8
+                      : (constraints.maxWidth < 420 ? 1.45 : 1.65),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Column(
+                itemBuilder: (context, index) =>
+                    _MetricCard(data: metrics[index]),
+              );
+
+              final compliancePanel = Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Compliance Status',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      _StatusRow(
+                        label: 'Compliant',
+                        color: AppColors.green,
+                        value: compliantCount.toInt().toString(),
+                        icon: Icons.check_circle_outline,
+                      ),
+                      const SizedBox(height: 10),
+                      _StatusRow(
+                        label: 'Expiring Soon',
+                        color: AppColors.orange,
+                        value: expiringSoonCount.toInt().toString(),
+                        icon: Icons.warning_amber_rounded,
+                      ),
+                      const SizedBox(height: 10),
+                      _StatusRow(
+                        label: 'Non-Compliant',
+                        color: AppColors.red,
+                        value: nonCompliantCount.toInt().toString(),
+                        icon: Icons.cancel_outlined,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+
+              final recentAlertsPanel = Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Recent Alerts',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                widget.onNavigate(AppNavItem.notifications),
+                            child: const Text('View All'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (notifications.isEmpty)
+                        const Text(
+                          'No recent alerts available.',
+                          style: TextStyle(color: AppColors.mutedText),
+                        )
+                      else
+                        ...notifications.take(3).map((n) {
+                          final announcement =
+                              (n['announcement'] as Map?)
+                                  ?.cast<String, dynamic>() ??
+                              {};
+                          final title =
+                              (announcement['title'] ?? 'Notification')
+                                  .toString();
+                          final timestamp =
+                              (announcement['published_at'] ??
+                                      n['created_at'] ??
+                                      '')
+                                  .toString();
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF7F9FD),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFDCE2ED),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _formatTimestamp(timestamp),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.mutedText,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+              );
+
+              final calendarPanel = Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'System Calendar',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DashboardCalendar(),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'UPCOMING EVENTS',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (notifications.isEmpty)
+                        const Text(
+                          'No upcoming events yet.',
+                          style: TextStyle(color: AppColors.mutedText),
+                        )
+                      else
+                        ...notifications.take(2).map((n) {
+                          final announcement =
+                              (n['announcement'] as Map?)
+                                  ?.cast<String, dynamic>() ??
+                              {};
+                          final title =
+                              (announcement['title'] ?? 'Notification')
+                                  .toString();
+                          final subtitle =
+                              (announcement['published_at'] ??
+                                      n['created_at'] ??
+                                      '')
+                                  .toString();
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _EventRow(
+                              color: AppColors.primaryBlue,
+                              title: title,
+                              subtitle: _formatTimestamp(subtitle),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+              );
+
+              if (!isWide) {
+                return ListView(
+                  padding: const EdgeInsets.only(bottom: 18),
                   children: [
-                    SummaryCard(
-                      title: 'Active Credentials',
-                      value: activeCredentialsCount,
-                      subtitle: 'From Supabase employee_credentials',
-                      icon: Icons.description_outlined,
-                      iconColor: AppColors.primaryBlue,
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: Text(
+                        'Welcome back, $welcomeName!',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: const Text(
+                        'Here is an overview of your HR information.',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 10),
-                    SummaryCard(
-                      title: 'Attendance (Present)',
-                      value: (attendanceSummary['present'] ?? 0).toString(),
-                      subtitle: 'Current records',
-                      icon: Icons.schedule,
-                      iconColor: AppColors.green,
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: metricsGrid,
                     ),
-                    const SizedBox(height: 10),
-                    SummaryCard(
-                      title: 'Leave Balance Sets',
-                      value: (leaveSummary['balance_count'] ?? 0).toString(),
-                      subtitle: 'Types with balances',
-                      icon: Icons.calendar_month_outlined,
-                      iconColor: AppColors.orange,
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: compliancePanel,
                     ),
-                    const SizedBox(height: 10),
-                    SummaryCard(
-                      title: 'Notifications',
-                      value: notifications.length.toString(),
-                      subtitle: 'Recent alerts',
-                      icon: Icons.notifications_none,
-                      iconColor: AppColors.purple,
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: recentAlertsPanel,
                     ),
-                    const SizedBox(height: 10),
-                    SummaryCard(
-                      title: 'Supabase',
-                      value: supabaseConnected ? 'OK' : 'ERR',
-                      subtitle: supabaseSubtitle,
-                      icon: supabaseConnected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-                      iconColor: supabaseConnected ? AppColors.green : AppColors.red,
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                      child: calendarPanel,
+                    ),
+                  ],
+                );
+              }
+
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPad,
+                  10,
+                  horizontalPad,
+                  18,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome back, $welcomeName!',
+                      style: const TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Here is an overview of your HR information.',
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        fontSize: 22,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    metricsGrid,
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            children: [
+                              compliancePanel,
+                              const SizedBox(height: 14),
+                              recentAlertsPanel,
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(child: calendarPanel),
+                      ],
                     ),
                   ],
                 ),
-              ),
-              const SectionTitle(title: 'Compliance Status'),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      children: [
-                        _StatusRow(label: 'Present', color: AppColors.green, value: (attendanceSummary['present'] ?? 0).toString(), icon: Icons.check_circle_outline),
-                        const SizedBox(height: 10),
-                        _StatusRow(label: 'Absent', color: AppColors.amber, value: (attendanceSummary['absent'] ?? 0).toString(), icon: Icons.error_outline),
-                        const SizedBox(height: 10),
-                        _StatusRow(label: 'On Leave', color: AppColors.red, value: (attendanceSummary['on_leave'] ?? 0).toString(), icon: Icons.cancel_outlined),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              SectionTitle(
-                title: 'Recent Alerts',
-                trailing: TextButton(onPressed: () => widget.onNavigate(AppNavItem.notifications), child: const Text('View All')),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Column(
-                  children: notifications.take(3).map((n) {
-                    final announcement = (n['announcement'] as Map?)?.cast<String, dynamic>() ?? {};
-                    final title = (announcement['title'] ?? 'Notification').toString();
-                    final subtitle = (announcement['published_at'] ?? n['created_at'] ?? '').toString();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _AlertTile(
-                        iconBg: const Color(0xFFEFF6FF),
-                        icon: Icons.campaign_outlined,
-                        iconColor: AppColors.primaryBlue,
-                        title: title,
-                        subtitle: subtitle,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SectionTitle(title: 'System Calendar'),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        DashboardCalendar(),
-                        const SizedBox(height: 12),
-                        const Text('UPCOMING EVENTS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.mutedText)),
-                        const SizedBox(height: 10),
-                        const _EventRow(color: AppColors.orange, title: 'EDSA People Power Anniversary', subtitle: 'Feb 25, 2026'),
-                        const SizedBox(height: 8),
-                        const _EventRow(color: AppColors.purple, title: 'CHED Compliance Deadline', subtitle: 'Feb 22, 2026'),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
+              );
+            },
           );
         },
       ),
     );
   }
+
+  String _formatTimestamp(String value) {
+    if (value.isEmpty) {
+      return '-';
+    }
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) {
+      return value;
+    }
+    return DateFormat('MMM d, hh:mm a').format(parsed.toLocal());
+  }
+}
+
+class _MetricData {
+  const _MetricData({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({required this.data});
+
+  final _MetricData data;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact =
+            constraints.maxWidth < 190 || constraints.maxHeight < 130;
+
+        return Card(
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 12 : 14,
+              vertical: compact ? 10 : 12,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  data.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 12 : 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.mutedText,
+                  ),
+                ),
+                SizedBox(height: compact ? 2 : 4),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        data.value,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: compact ? 34 : 44,
+                          fontWeight: FontWeight.w900,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: compact ? 2 : 4),
+                Text(
+                  data.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 12 : 16,
+                    color: AppColors.mutedText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.label, required this.color, required this.value, required this.icon});
+  const _StatusRow({
+    required this.label,
+    required this.color,
+    required this.value,
+    required this.icon,
+  });
   final String label;
   final Color color;
   final String value;
@@ -250,7 +568,12 @@ class _StatusRow extends StatelessWidget {
         children: [
           Icon(icon, color: color),
           const SizedBox(width: 10),
-          Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700))),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -258,7 +581,10 @@ class _StatusRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
               border: Border.all(color: color.withValues(alpha: 0.35)),
             ),
-            child: Text(value, style: TextStyle(color: color, fontWeight: FontWeight.w900)),
+            child: Text(
+              value,
+              style: TextStyle(color: color, fontWeight: FontWeight.w900),
+            ),
           ),
         ],
       ),
@@ -266,34 +592,12 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
-class _AlertTile extends StatelessWidget {
-  const _AlertTile({required this.iconBg, required this.icon, required this.iconColor, required this.title, required this.subtitle});
-  final Color iconBg;
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: iconColor),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-        subtitle: Text(subtitle, style: const TextStyle(color: AppColors.mutedText, fontSize: 11)),
-        onTap: () {},
-      ),
-    );
-  }
-}
-
 class _EventRow extends StatelessWidget {
-  const _EventRow({required this.color, required this.title, required this.subtitle});
+  const _EventRow({
+    required this.color,
+    required this.title,
+    required this.subtitle,
+  });
   final Color color;
   final String title;
   final String subtitle;
@@ -302,14 +606,30 @@ class _EventRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-              Text(subtitle, style: const TextStyle(color: AppColors.mutedText, fontSize: 11)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: AppColors.mutedText,
+                  fontSize: 11,
+                ),
+              ),
             ],
           ),
         ),

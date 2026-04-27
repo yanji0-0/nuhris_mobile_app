@@ -1,4 +1,5 @@
 import 'package:bcrypt/bcrypt.dart';
+import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ApiClient {
@@ -17,6 +18,12 @@ class ApiClient {
   static const int _employeeUserType = 3;
   static const String _loginFailedMessage =
       'These credentials do not match our records.';
+  static const List<String> _credentialFilesBuckets = [
+    'employee_credentials',
+    'employee-credentials',
+    'credentials',
+    'uploads',
+  ];
 
   Future<bool> hasEmployeeAccess() async {
     if (!isAuthenticated) {
@@ -139,13 +146,27 @@ class ApiClient {
 
     final leaveBalances = await _client
         .from('leave_balances')
-        .select('id')
+        .select('id,remaining_days')
         .eq('employee_id', employeeId);
 
     final leaveRequests = await _client
         .from('leave_requests')
         .select('id,status')
         .eq('employee_id', employeeId);
+
+    final credentialRows = await _client
+        .from('employee_credentials')
+        .select('id,status,expires_at')
+        .eq('employee_id', employeeId);
+
+    final user = await _currentUserRow();
+    final userId = user?['id'];
+    final notificationRows = userId == null
+        ? const []
+        : await _client
+              .from('announcement_notifications')
+              .select('id,is_read')
+              .eq('user_id', userId);
 
     final attendanceSummary = <String, int>{
       'present': 0,
@@ -165,6 +186,64 @@ class ApiClient {
         .where((row) => (row['status'] ?? '').toString() == 'pending')
         .length;
 
+    final activeStatuses = <String>{
+      'active',
+      'verified',
+      'approved',
+      'compliant',
+      'valid',
+    };
+
+    final nonCompliantStatuses = <String>{
+      'expired',
+      'rejected',
+      'invalid',
+      'non-compliant',
+      'non_compliant',
+    };
+
+    final activeCredentials = credentialRows.whereType<Map>().where((row) {
+      final status = (row['status'] ?? '').toString().trim().toLowerCase();
+      return activeStatuses.contains(status);
+    }).length;
+
+    final nonCompliantCredentials = credentialRows.whereType<Map>().where((
+      row,
+    ) {
+      final status = (row['status'] ?? '').toString().trim().toLowerCase();
+      return nonCompliantStatuses.contains(status);
+    }).length;
+
+    final now = DateTime.now();
+    final expiringSoon = credentialRows.whereType<Map>().where((row) {
+      final raw = (row['expires_at'] ?? '').toString();
+      if (raw.isEmpty) {
+        return false;
+      }
+      final date = DateTime.tryParse(raw);
+      if (date == null || date.isBefore(now)) {
+        return false;
+      }
+      final days = date.difference(now).inDays;
+      return days <= 30;
+    }).length;
+
+    final unreadNotifications = notificationRows
+        .whereType<Map>()
+        .where((row) => row['is_read'] != true)
+        .length;
+
+    final totalLeaveDays = leaveBalances.whereType<Map>().fold<double>(0, (
+      sum,
+      row,
+    ) {
+      final value = row['remaining_days'];
+      if (value is num) {
+        return sum + value.toDouble();
+      }
+      return sum + (double.tryParse(value?.toString() ?? '') ?? 0);
+    });
+
     return {
       'employee': employee,
       'attendance_summary': attendanceSummary,
@@ -172,6 +251,18 @@ class ApiClient {
         'balance_count': leaveBalances.length,
         'request_count': leaveRequests.length,
         'pending_requests': pending,
+        'total_days_remaining': totalLeaveDays,
+      },
+      'credentials_summary': {
+        'total_count': credentialRows.length,
+        'active_count': activeCredentials,
+        'expiring_soon_count': expiringSoon,
+        'non_compliant_count': nonCompliantCredentials,
+        'compliant_count': activeCredentials,
+      },
+      'notifications_summary': {
+        'total_count': notificationRows.length,
+        'unread_count': unreadNotifications,
       },
     };
   }
@@ -360,6 +451,115 @@ class ApiClient {
 
     final list = _toMapList(rows);
     return list.isNotEmpty ? list.first : <String, dynamic>{};
+  }
+
+  Future<String> uploadEmployeeCredentialFile({
+    required dynamic employeeId,
+    required Uint8List fileBytes,
+    required String originalFileName,
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final safeName = originalFileName.trim().replaceAll(
+      RegExp(r'[^a-zA-Z0-9._-]'),
+      '_',
+    );
+    final user = await _currentUserRow();
+    final authUid = (_client.auth.currentUser?.id ?? '').trim();
+    final userId = (user?['id'] ?? '').toString().trim();
+
+    final candidatePrefixes = <String>{
+      'employee-$employeeId',
+      'employee_$employeeId',
+      if (authUid.isNotEmpty) authUid,
+      if (userId.isNotEmpty) 'user-$userId',
+      if (userId.isNotEmpty) userId,
+    }.toList();
+
+    final contentType = _contentTypeFromFileName(safeName);
+
+    StorageException? lastMissingBucketError;
+    StorageException? lastPolicyDeniedError;
+
+    for (final bucket in _credentialFilesBuckets) {
+      for (final prefix in candidatePrefixes) {
+        final filePath = '$prefix/$timestamp\_$safeName';
+        try {
+          await _client.storage
+              .from(bucket)
+              .uploadBinary(
+                filePath,
+                fileBytes,
+                fileOptions: FileOptions(
+                  contentType: contentType,
+                  upsert: false,
+                ),
+              );
+          return '$bucket/$filePath';
+        } on StorageException catch (error) {
+          final message = error.message.toLowerCase();
+          final isMissingBucket =
+              message.contains('bucket not found') ||
+              message.contains('not found') ||
+              message.contains('does not exist');
+          final isPolicyDenied =
+              message.contains('row-level security') ||
+              message.contains('violates') ||
+              message.contains('not authorized') ||
+              message.contains('permission denied');
+
+          if (isMissingBucket) {
+            lastMissingBucketError = error;
+            // No need to try other prefixes if bucket itself is missing.
+            break;
+          }
+
+          if (isPolicyDenied) {
+            lastPolicyDeniedError = error;
+            continue;
+          }
+
+          throw ApiException('File upload failed: ${error.message}');
+        } catch (error) {
+          throw ApiException('File upload failed: $error');
+        }
+      }
+    }
+
+    if (lastPolicyDeniedError != null) {
+      throw ApiException(
+        'File upload failed: ${lastPolicyDeniedError.message}. The bucket exists but RLS denied the upload. Check INSERT policy for storage.objects.',
+      );
+    }
+
+    if (lastMissingBucketError != null) {
+      throw ApiException(
+        'File upload failed: ${lastMissingBucketError.message}. Check storage bucket name for: ${_credentialFilesBuckets.join(', ')}.',
+      );
+    }
+
+    throw ApiException(
+      'File upload failed: unable to upload the selected file.',
+    );
+  }
+
+  String _contentTypeFromFileName(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (lower.endsWith('.doc')) {
+      return 'application/msword';
+    }
+    if (lower.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    if (lower.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    return 'application/octet-stream';
   }
 
   Future<void> _loadCurrentUserFromTable(String email) async {
