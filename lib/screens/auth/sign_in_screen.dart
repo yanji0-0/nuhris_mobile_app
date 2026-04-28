@@ -26,6 +26,51 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
+  String _mapLoginErrorMessage(String? error) {
+    final raw = (error ?? '').trim();
+    if (raw.isEmpty) {
+      return _defaultLoginFailedMessage;
+    }
+
+    final normalized = raw.toLowerCase();
+    if (normalized.contains('email and password are required')) {
+      return 'Please enter your email and password.';
+    }
+    if (normalized.contains('no account found')) {
+      return 'No account found for this email address.';
+    }
+    if (normalized.contains('credentials are incorrect') ||
+        normalized.contains('do not match our records')) {
+      return 'Incorrect email or password. Please try again.';
+    }
+    if (normalized.contains('email not confirmed') ||
+        normalized.contains('not confirmed')) {
+      return 'Please verify your email before signing in.';
+    }
+    if (normalized.contains('invalid login credentials') ||
+        normalized.contains('invalid credentials')) {
+      return 'Incorrect email or password. Please try again.';
+    }
+    if (normalized.contains('network') ||
+        normalized.contains('socketexception') ||
+        normalized.contains('timed out') ||
+        normalized.contains('timeout')) {
+      return 'Network issue detected. Check your internet connection and try again.';
+    }
+    if (normalized.contains('too many requests') ||
+        normalized.contains('rate limit')) {
+      return 'Too many sign-in attempts. Please wait a moment and try again.';
+    }
+
+    if (normalized.contains('employee profile not found') ||
+        normalized.contains('not allowed to access')) {
+      return 'Your account is valid but not linked to an employee profile yet.';
+    }
+
+    // Keep backend-provided messages visible so users see the real reason.
+    return raw;
+  }
+
   InputDecoration _inputDeco({
     required String hint,
     Widget? suffix,
@@ -355,9 +400,8 @@ class _SignInScreenState extends State<SignInScreen> {
 
                                     if (error != null) {
                                       setState(
-                                        () => _loginError = error.isEmpty
-                                            ? _defaultLoginFailedMessage
-                                            : error,
+                                        () => _loginError =
+                                            _mapLoginErrorMessage(error),
                                       );
                                     }
                                   },

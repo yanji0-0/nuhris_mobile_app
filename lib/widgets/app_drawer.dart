@@ -21,11 +21,13 @@ class AppDrawer extends StatefulWidget {
 
 class _AppDrawerState extends State<AppDrawer> {
   late final Future<Map<String, dynamic>> _accountFuture;
+  late final Future<String?> _profilePhotoUrlFuture;
 
   @override
   void initState() {
     super.initState();
     _accountFuture = ApiClient.instance.getAccount();
+    _profilePhotoUrlFuture = ApiClient.instance.getProfilePhotoUrl();
   }
 
   @override
@@ -57,7 +59,11 @@ class _AppDrawerState extends State<AppDrawer> {
           child: SafeArea(
             child: Column(
               children: [
-                _Header(displayName: displayName, email: email),
+                _Header(
+                  displayName: displayName,
+                  email: email,
+                  profilePhotoUrlFuture: _profilePhotoUrlFuture,
+                ),
                 const SizedBox(height: 14),
                 Expanded(
                   child: ListView(
@@ -166,10 +172,15 @@ class _AppDrawerState extends State<AppDrawer> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.displayName, required this.email});
+  const _Header({
+    required this.displayName,
+    required this.email,
+    required this.profilePhotoUrlFuture,
+  });
 
   final String displayName;
   final String email;
+  final Future<String?> profilePhotoUrlFuture;
 
   @override
   Widget build(BuildContext context) {
@@ -250,10 +261,21 @@ class _Header extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Row(
               children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: AppColors.nuhrisYellow,
-                child: Icon(Icons.person, color: AppColors.navy, size: 18),
+              FutureBuilder<String?>(
+                future: profilePhotoUrlFuture,
+                builder: (context, snapshot) {
+                  final photoUrl = snapshot.data;
+                  final hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
+                  
+                  return CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.nuhrisYellow,
+                    backgroundImage: hasPhoto ? NetworkImage(photoUrl.trim()) : null,
+                    child: !hasPhoto
+                        ? Icon(Icons.person, color: AppColors.navy, size: 18)
+                        : null,
+                  );
+                },
               ),
               const SizedBox(width: 10),
               Expanded(

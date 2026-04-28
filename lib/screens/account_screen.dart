@@ -29,9 +29,11 @@ class _AccountScreenState extends State<AccountScreen> {
   String _displayEmail = '';
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isUploadingPhoto = false;
   bool _isChangingPassword = false;
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _profilePhoto;
+  String? _profilePhotoUrl;
 
   final _employeeIdCtrl = TextEditingController();
   final _departmentCtrl = TextEditingController();
@@ -94,6 +96,7 @@ class _AccountScreenState extends State<AccountScreen> {
       );
       _addressCtrl.text = (employee['address'] ?? '').toString();
       employeeType = _normalizeEmployeeType(employee['employment_type']);
+      _profilePhotoUrl = await ApiClient.instance.getProfilePhotoUrl();
     } catch (_) {
       // Keep empty fallback values if request fails.
     } finally {
@@ -220,9 +223,62 @@ class _AccountScreenState extends State<AccountScreen> {
 
     if (!mounted || croppedImage == null) return;
 
+    final croppedFile = File(croppedImage.path);
+    // Force Flutter to reload file contents even if the same path is reused.
+    await FileImage(croppedFile).evict();
+
     setState(() {
-      _profilePhoto = XFile(croppedImage.path);
+      _profilePhoto = XFile(croppedFile.path);
     });
+
+    await _uploadProfilePhoto(croppedFile);
+  }
+
+  Future<void> _uploadProfilePhoto(File file) async {
+    if (_isUploadingPhoto) {
+      return;
+    }
+
+    setState(() => _isUploadingPhoto = true);
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final result = await ApiClient.instance.uploadProfilePhoto(
+        filePath: file.path,
+      );
+      final uploadedUrl = (result['url'] ?? '').trim();
+      final resolvedUrl = uploadedUrl.isNotEmpty
+          ? uploadedUrl
+          : (await ApiClient.instance.getProfilePhotoUrl() ?? '');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _profilePhotoUrl = resolvedUrl.isEmpty ? _profilePhotoUrl : resolvedUrl;
+      });
+
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Profile photo updated.')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final message = error is ApiException
+          ? error.message
+          : error.toString();
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Photo upload failed: $message')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingPhoto = false);
+      }
+    }
   }
 
   InputDecoration _inputDecoration({String? hintText}) {
@@ -331,6 +387,12 @@ class _AccountScreenState extends State<AccountScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ImageProvider<Object>? avatarImage = _profilePhoto != null
+        ? FileImage(File(_profilePhoto!.path))
+        : (_profilePhotoUrl != null && _profilePhotoUrl!.trim().isNotEmpty
+              ? NetworkImage(_profilePhotoUrl!.trim())
+              : null);
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.account,
@@ -394,10 +456,8 @@ class _AccountScreenState extends State<AccountScreen> {
                               child: CircleAvatar(
                                 radius: 31,
                                 backgroundColor: const Color(0xFFE9EEF3),
-                                backgroundImage: _profilePhoto != null
-                                    ? FileImage(File(_profilePhoto!.path))
-                                    : null,
-                                child: _profilePhoto == null
+                                backgroundImage: avatarImage,
+                                child: avatarImage == null
                                     ? const Icon(
                                         Icons.person,
                                         size: 38,
@@ -415,11 +475,20 @@ class _AccountScreenState extends State<AccountScreen> {
                                   color: AppColors.primaryBlue,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(
-                                  Icons.camera_alt,
-                                  size: 14,
-                                  color: Colors.white,
-                                ),
+                                child: _isUploadingPhoto
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.camera_alt,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
                               ),
                             ),
                           ],

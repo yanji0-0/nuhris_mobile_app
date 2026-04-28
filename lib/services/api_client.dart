@@ -1,4 +1,5 @@
 import 'package:bcrypt/bcrypt.dart';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -18,11 +19,19 @@ class ApiClient {
   static const int _employeeUserType = 3;
   static const String _loginFailedMessage =
       'These credentials do not match our records.';
+  static const String _profilePhotoBucket = 'credentials';
+  static const String _profilePhotoPathPrefix = 'credentials/';
   static const List<String> _credentialFilesBuckets = [
     'CREDENTIALS',
     'employee_credentials',
     'employee-credentials',
     'credentials',
+    'uploads',
+  ];
+  static const List<String> _profilePhotoBuckets = [
+    'profile-photos',
+    'profile_photos',
+    'avatars',
     'uploads',
   ];
 
@@ -34,7 +43,7 @@ class ApiClient {
     try {
       final user = await _currentUserRow();
       final userType = _parseUserType(user?['user_type']);
-      if (userType != _employeeUserType) {
+      if (userType != null && userType != _employeeUserType) {
         await logout();
         return false;
       }
@@ -66,6 +75,7 @@ class ApiClient {
         email: normalizedEmail,
         password: password,
       );
+
     } catch (_) {
       // Fallback to public users table login for projects not using Supabase Auth.
       final rows = await _client
@@ -111,7 +121,7 @@ class ApiClient {
     await _loadCurrentUserFromTable(normalizedEmail);
 
     final currentUserType = _parseUserType(_user?['user_type']);
-    if (currentUserType != _employeeUserType) {
+    if (currentUserType != null && currentUserType != _employeeUserType) {
       await logout();
       throw ApiException(_loginFailedMessage);
     }
@@ -422,6 +432,164 @@ class ApiClient {
     return {'message': 'Account updated successfully.', ...refreshed};
   }
 
+  Future<Map<String, String>> uploadProfilePhoto({
+    required String filePath,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw ApiException('Selected photo file was not found.');
+    }
+
+    final bytes = await file.readAsBytes();
+    final authUid = (_client.auth.currentUser?.id ?? '').trim();
+
+    if (authUid.isEmpty) {
+      throw ApiException(
+        'Profile photo upload requires an authenticated Supabase session. Please sign in again.',
+      );
+    }
+
+    const contentType = 'image/jpeg';
+    StorageException? lastMissingBucketError;
+    StorageException? lastPolicyDeniedError;
+    Exception? lastOtherError;
+
+    final filePathOnBucket = '$authUid/profile.jpg';
+    try {
+      await _client.storage.from(_profilePhotoBucket).uploadBinary(
+            filePathOnBucket,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: contentType,
+              upsert: true,
+            ),
+          );
+
+      final savedPath = '$_profilePhotoPathPrefix$filePathOnBucket';
+      await _persistProfilePhotoPath(savedPath);
+
+      final publicUrl = _client.storage
+          .from(_profilePhotoBucket)
+          .getPublicUrl(filePathOnBucket);
+
+      return {'path': savedPath, 'url': publicUrl};
+    } on StorageException catch (error) {
+      final msg = error.message.toLowerCase();
+      final isMissingBucket =
+          msg.contains('bucket not found') ||
+          msg.contains('bucket does not exist') ||
+          (msg.contains('does not exist') && msg.contains('bucket'));
+      if (isMissingBucket) {
+        lastMissingBucketError = error;
+      } else if (msg.contains('row-level security') ||
+          msg.contains('not authorized') ||
+          msg.contains('permission denied') ||
+          msg.contains('violates')) {
+        lastPolicyDeniedError = error;
+      } else {
+        lastOtherError = error;
+      }
+    } catch (error) {
+      lastOtherError = Exception(error.toString());
+    }
+
+    if (lastPolicyDeniedError != null) {
+      throw ApiException(
+        'Profile photo upload failed: ${lastPolicyDeniedError.message}. The bucket exists but RLS denied the upload. Check INSERT policy for storage.objects and ensure the upload path/prefix is allowed.',
+      );
+    }
+
+    if (lastMissingBucketError != null) {
+      final bucketNames = _profilePhotoBuckets.join(', ');
+      throw ApiException(
+        'Profile photo upload failed: ${lastMissingBucketError.message}. Check storage bucket names: $bucketNames.',
+      );
+    }
+
+    if (lastOtherError != null) {
+      throw ApiException('Profile photo upload failed: $lastOtherError');
+    }
+
+    throw ApiException('Profile photo upload failed: unable to upload the selected file.');
+  }
+
+  Future<String?> getProfilePhotoUrl() async {
+    final user = await _currentUserRow();
+    final employee = await _currentEmployee();
+
+    Map<String, dynamic> userRow = user ?? <String, dynamic>{};
+    Map<String, dynamic> employeeRow = employee ?? <String, dynamic>{};
+
+    if (user?['id'] != null) {
+      try {
+        final rows = await _client
+            .from('users')
+            .select('*')
+            .eq('id', user!['id'])
+            .limit(1);
+        final list = _toMapList(rows);
+        if (list.isNotEmpty) {
+          userRow = list.first;
+        }
+      } catch (_) {
+        // Best effort only.
+      }
+    }
+
+    if (employee?['id'] != null) {
+      try {
+        final rows = await _client
+            .from('employees')
+            .select('*')
+            .eq('id', employee!['id'])
+            .limit(1);
+        final list = _toMapList(rows);
+        if (list.isNotEmpty) {
+          employeeRow = list.first;
+        }
+      } catch (_) {
+        // Best effort only.
+      }
+    }
+
+    final storedPath = _extractProfilePhotoPath(userRow, employeeRow);
+    if (storedPath != null) {
+      final url = await _tryCreateSignedUrlFromStoredPath(storedPath);
+      if (url != null) {
+        return url;
+      }
+    }
+
+    final authUid = (_client.auth.currentUser?.id ?? '').trim();
+    final userId = (user?['id'] ?? '').toString().trim();
+    final employeeId = (employee?['id'] ?? '').toString().trim();
+    final prefixes = <String>{
+      if (employeeId.isNotEmpty) 'employee-$employeeId',
+      if (userId.isNotEmpty) 'user-$userId',
+      if (authUid.isNotEmpty) authUid,
+      if (userId.isNotEmpty) userId,
+    };
+
+    const extensions = ['jpg', 'jpeg', 'png'];
+
+    for (final bucket in _profilePhotoBuckets) {
+      for (final prefix in prefixes) {
+        for (final ext in extensions) {
+          final path = '$prefix/avatar.$ext';
+          try {
+            return await _client.storage
+                .from(bucket)
+                .createSignedUrl(path, 60 * 60 * 24 * 30);
+          } catch (_) {
+            // Try next candidate.
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   Future<void> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -689,19 +857,109 @@ class ApiClient {
     return 'application/octet-stream';
   }
 
-  Future<void> _loadCurrentUserFromTable(String email) async {
-    final rows = await _client
-        .from('users')
-        .select(
-          'id,name,email,user_type,must_change_password,email_verified_at',
-        )
-        .ilike('email', email)
-        .limit(1);
+  String? _extractProfilePhotoPath(
+    Map<String, dynamic> user,
+    Map<String, dynamic> employee,
+  ) {
+    const keys = [
+      'profilephoto_path',
+      'profile_photo_path',
+      'profile_image_path',
+      'avatar_path',
+      'photo_path',
+      'image_path',
+      'profile_photo',
+      'avatar_url',
+      'photo_url',
+      'image_url',
+    ];
 
-    final list = _toMapList(rows);
-    if (list.isNotEmpty) {
-      _user = list.first;
-      return;
+    for (final key in keys) {
+      final employeeValue = (employee[key] ?? '').toString().trim();
+      if (employeeValue.isNotEmpty) {
+        return employeeValue;
+      }
+
+      final userValue = (user[key] ?? '').toString().trim();
+      if (userValue.isNotEmpty) {
+        return userValue;
+      }
+    }
+
+    return null;
+  }
+
+  Future<String?> _tryCreateSignedUrlFromStoredPath(String storedPath) async {
+    final normalized = storedPath.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    for (final bucket in _profilePhotoBuckets) {
+      if (normalized.startsWith('$bucket/')) {
+        final objectPath = normalized.substring(bucket.length + 1);
+        try {
+          return await _client.storage
+              .from(bucket)
+              .createSignedUrl(objectPath, 60 * 60 * 24 * 30);
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+
+    for (final bucket in _profilePhotoBuckets) {
+      try {
+        return await _client.storage
+            .from(bucket)
+            .createSignedUrl(normalized, 60 * 60 * 24 * 30);
+      } catch (_) {
+        // Try next bucket.
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _persistProfilePhotoPath(String path) async {
+    final employee = await _currentEmployee();
+
+    // Prefer updating the `employees` row (user requested canonical storage there).
+    if (employee == null || employee['id'] == null) {
+      throw ApiException('Employee profile not found while saving profile photo path.');
+    }
+
+    try {
+      await _client
+          .from('employees')
+          .update({'profilephoto_path': path})
+          .eq('id', employee['id']);
+    } on PostgrestException catch (error) {
+      throw ApiException(
+        'Profile photo uploaded, but failed to save employees.profilephoto_path: ${error.message}',
+      );
+    } catch (error) {
+      throw ApiException(
+        'Profile photo uploaded, but failed to save employees.profilephoto_path: $error',
+      );
+    }
+  }
+
+  Future<void> _loadCurrentUserFromTable(String email) async {
+    try {
+      final rows = await _client
+          .from('users')
+          .select('*')
+          .ilike('email', email)
+          .limit(1);
+
+      final list = _toMapList(rows);
+      if (list.isNotEmpty) {
+        _user = list.first;
+        return;
+      }
+    } catch (_) {
+      // Fallback to auth metadata when direct users-table read is unavailable.
     }
 
     final authUser = _client.auth.currentUser;
@@ -732,20 +990,46 @@ class ApiClient {
   Future<Map<String, dynamic>?> _currentEmployee() async {
     final user = await _currentUserRow();
     final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
-        .toString();
-    if (email.isEmpty) {
-      return null;
+        .toString()
+        .trim();
+    final userId = (user?['id'] ?? '').toString().trim();
+
+    Future<List<Map<String, dynamic>>> fetchByEmail() async {
+      if (email.isEmpty) {
+        return const [];
+      }
+      try {
+        final rows = await _client
+            .from('employees')
+            .select('*')
+            .ilike('email', email)
+            .limit(1);
+        return _toMapList(rows);
+      } catch (_) {
+        return const [];
+      }
     }
 
-    final rows = await _client
-        .from('employees')
-        .select(
-          'id,employee_id,first_name,last_name,email,phone,department_id,position,employment_type,ranking,status,hire_date,official_time_in,official_time_out,resume_last_updated_at,address',
-        )
-        .ilike('email', email)
-        .limit(1);
+    Future<List<Map<String, dynamic>>> fetchByUserId() async {
+      if (userId.isEmpty) {
+        return const [];
+      }
+      try {
+        final rows = await _client
+            .from('employees')
+            .select('*')
+            .eq('user_id', userId)
+            .limit(1);
+        return _toMapList(rows);
+      } catch (_) {
+        return const [];
+      }
+    }
 
-    final list = _toMapList(rows);
+    var list = await fetchByEmail();
+    if (list.isEmpty) {
+      list = await fetchByUserId();
+    }
     if (list.isEmpty) {
       return null;
     }

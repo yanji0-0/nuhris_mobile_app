@@ -36,7 +36,7 @@ class _AppShellState extends State<AppShell> {
       await ApiClient.instance.login(email: email, password: password);
       final allowed = await ApiClient.instance.hasEmployeeAccess();
       if (!allowed) {
-        return 'These credentials do not match our records.';
+        return 'Your account is not allowed to access the employee app.';
       }
       if (mounted) {
         setState(() => isLoggedIn = true);
@@ -44,8 +44,8 @@ class _AppShellState extends State<AppShell> {
       return null;
     } on ApiException catch (error) {
       return error.message;
-    } catch (_) {
-      return 'Unable to sign in right now. Please try again.';
+    } catch (error) {
+      return error.toString();
     }
   }
 
