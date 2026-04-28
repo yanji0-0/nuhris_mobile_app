@@ -29,6 +29,7 @@ class ApiClient {
     'uploads',
   ];
   static const List<String> _profilePhotoBuckets = [
+    'credentials',
     'profile-photos',
     'profile_photos',
     'avatars',
