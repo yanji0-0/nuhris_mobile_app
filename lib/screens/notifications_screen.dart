@@ -40,6 +40,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         final category = (announcement['target_office'] ?? 'General')
             .toString();
         return _NotifItem(
+          id: (row['id'] ?? '').toString(),
+          isRead: (row['is_read'] ?? false) == true,
           category: category,
           title: (announcement['title'] ?? 'Notification').toString(),
           message: (announcement['content'] ?? 'No details provided.')
@@ -78,9 +80,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return ['All', ...categories];
   }
 
-  List<_NotifItem> get filtered {
-    if (selectedTab == 'All') return items;
-    return items.where((e) => e.category == selectedTab).toList();
+  List<_NotifItem> get filtered => items;
+
+  Future<void> _markAllRead() async {
+    setState(() => _isLoading = true);
+    try {
+      await ApiClient.instance.markAllNotificationsRead();
+      await _loadNotifications();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark all read: $error')));
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _clearAll() async {
+    setState(() => _isLoading = true);
+    try {
+      await ApiClient.instance.clearAllNotifications();
+      await _loadNotifications();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to clear notifications: $error')));
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -172,56 +195,34 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               ),
             )
           else ...[
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFFE3E8F2)),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: tabs.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final t = entry.value;
-                    final isSelected = selectedTab == t;
-                    final count = _getTabCount(t);
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        right: index == tabs.length - 1 ? 0 : 8,
-                      ),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(22),
-                        onTap: () => setState(() => selectedTab = t),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 11,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFF0A2E86)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(22),
-                          ),
-                          child: Text(
-                            '$t ($count)',
-                            style: TextStyle(
-                              color: isSelected
-                                  ? Colors.white
-                                  : const Color(0xFF58657A),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+            // Header actions: Read All and Clear All
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _markAllRead,
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: AppColors.primaryBlue,
+                    side: const BorderSide(color: Color(0xFFCCD6E6)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  child: const Text('Read All'),
                 ),
-              ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _clearAll,
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF374151),
+                    side: const BorderSide(color: Color(0xFFCCD6E6)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  child: const Text('Clear All'),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             if (list.isEmpty)
@@ -260,10 +261,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  int _getTabCount(String tabName) {
-    if (tabName == 'All') return items.length;
-    return items.where((item) => item.category == tabName).length;
-  }
+  // Tab counting removed — tabs UI replaced with Read All / Clear All actions.
 
   Color _priorityColor(String priority) {
     switch (priority.toLowerCase()) {
@@ -367,7 +365,25 @@ class _NotificationCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                      const SizedBox(width: 8),
+                      if (item.isRead != true) ...[
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE1F0FF),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'UNREAD',
+                            style: TextStyle(
+                              color: Color(0xFF2673EC),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -436,6 +452,8 @@ class _NotificationCard extends StatelessWidget {
 }
 
 class _NotifItem {
+  final String id;
+  final bool isRead;
   final String category;
   final String title;
   final String message;
@@ -446,7 +464,9 @@ class _NotifItem {
   final IconData icon;
   final Color iconColor;
 
-  const _NotifItem({
+  _NotifItem({
+    required this.id,
+    required this.isRead,
     required this.category,
     required this.title,
     required this.message,

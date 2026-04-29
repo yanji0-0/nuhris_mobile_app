@@ -76,7 +76,6 @@ class ApiClient {
         email: normalizedEmail,
         password: password,
       );
-
     } catch (_) {
       // Fallback to public users table login for projects not using Supabase Auth.
       final rows = await _client
@@ -293,6 +292,100 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  Future<Map<String, dynamic>> submitEmployeeSchedule({
+    required String termLabel,
+    required List<Map<String, dynamic>> days,
+  }) async {
+    final employee = await _currentEmployee();
+    final user = await _currentUserRow();
+    if (employee == null || employee['id'] == null) {
+      throw ApiException('Employee profile not found.');
+    }
+    if (user == null || user['id'] == null) {
+      throw ApiException('User profile not found.');
+    }
+
+    final normalizedTerm = termLabel.trim();
+    if (normalizedTerm.isEmpty) {
+      throw ApiException('Term is required.');
+    }
+
+    // Normalize term labels to canonical "Term" form so web and mobile match.
+    // e.g. convert "3rd Semester" -> "3rd Term"
+    final canonicalTerm = normalizedTerm.replaceAll(
+      RegExp(r'Semester', caseSensitive: false),
+      'Term',
+    );
+
+    if (days.isEmpty) {
+      throw ApiException('At least one schedule day is required.');
+    }
+
+    final employeeId = employee['id'];
+    final submittedBy = user['id'];
+    final submittedAt = DateTime.now().toUtc().toIso8601String();
+
+    late int submissionId;
+    try {
+      final submissionRows = await _client
+          .from('employee_schedule_submissions')
+          .insert({
+            'employee_id': employeeId,
+            'submitted_by': submittedBy,
+            'semester_label': canonicalTerm,
+            'term_label': canonicalTerm,
+            'status': 'pending',
+            'submitted_at': submittedAt,
+            'is_current': false,
+          })
+          .select('id');
+
+      final submissionList = _toMapList(submissionRows);
+      if (submissionList.isEmpty || submissionList.first['id'] == null) {
+        throw ApiException(
+          'Schedule submission failed: unable to create header row.',
+        );
+      }
+
+      submissionId = submissionList.first['id'] as int;
+    } on PostgrestException catch (error) {
+      throw ApiException(
+        'Failed to create schedule submission header (RLS/permission issue?): ${error.message}',
+      );
+    } catch (error) {
+      throw ApiException('Failed to create schedule submission header: $error');
+    }
+
+    final dayRows = days.map((day) {
+      final hasWork = day['has_work'] == true;
+      return <String, dynamic>{
+        'schedule_submission_id': submissionId,
+        'day_name': (day['day_name'] ?? '').toString(),
+        'day_index': day['day_index'],
+        'has_work': hasWork,
+        'time_in': hasWork ? day['time_in'] : null,
+        'time_out': hasWork ? day['time_out'] : null,
+      };
+    }).toList();
+
+    try {
+      await _client.from('employee_schedule_days').insert(dayRows);
+    } on PostgrestException catch (error) {
+      throw ApiException(
+        'Failed to save schedule days (RLS/permission issue?): ${error.message}',
+      );
+    } catch (error) {
+      throw ApiException('Failed to save schedule days: $error');
+    }
+
+    return {
+      'message': 'Schedule submitted successfully.',
+      'submission_id': submissionId,
+      'term_label': normalizedTerm,
+      'day_count': dayRows.length,
+    };
+  }
+
   Future<Map<String, dynamic>> getLeaveMonitoring() async {
     final employee = await _currentEmployee();
     if (employee == null) {
@@ -380,6 +473,38 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  Future<void> markAllNotificationsRead() async {
+    final user = await _currentUserRow();
+    if (user == null || user['id'] == null) {
+      throw ApiException('User profile not found.');
+    }
+
+    try {
+      await _client
+          .from('announcement_notifications')
+          .update({'is_read': true, 'read_at': DateTime.now().toIso8601String()})
+          .eq('user_id', user['id']);
+    } catch (error) {
+      throw ApiException('Failed to mark notifications read: $error');
+    }
+  }
+
+  Future<void> clearAllNotifications() async {
+    final user = await _currentUserRow();
+    if (user == null || user['id'] == null) {
+      throw ApiException('User profile not found.');
+    }
+
+    try {
+      await _client
+          .from('announcement_notifications')
+          .delete()
+          .eq('user_id', user['id']);
+    } catch (error) {
+      throw ApiException('Failed to clear notifications: $error');
+    }
+  }
+
   Future<Map<String, dynamic>> getAccount() async {
     final user = await _currentUserRow();
     final employee = await _currentEmployee();
@@ -455,9 +580,11 @@ class ApiClient {
     StorageException? lastPolicyDeniedError;
     Exception? lastOtherError;
 
-    final filePathOnBucket = '$authUid/profile.jpg';
+    final filePathOnBucket = '$authUid/avatar.jpg';
     try {
-      await _client.storage.from(_profilePhotoBucket).uploadBinary(
+      await _client.storage
+          .from(_profilePhotoBucket)
+          .uploadBinary(
             filePathOnBucket,
             bytes,
             fileOptions: const FileOptions(
@@ -511,7 +638,9 @@ class ApiClient {
       throw ApiException('Profile photo upload failed: $lastOtherError');
     }
 
-    throw ApiException('Profile photo upload failed: unable to upload the selected file.');
+    throw ApiException(
+      'Profile photo upload failed: unable to upload the selected file.',
+    );
   }
 
   Future<String?> getProfilePhotoUrl() async {
@@ -572,17 +701,20 @@ class ApiClient {
     };
 
     const extensions = ['jpg', 'jpeg', 'png'];
+    const fileNames = ['avatar', 'profile'];
 
     for (final bucket in _profilePhotoBuckets) {
       for (final prefix in prefixes) {
-        for (final ext in extensions) {
-          final path = '$prefix/avatar.$ext';
-          try {
-            return await _client.storage
-                .from(bucket)
-                .createSignedUrl(path, 60 * 60 * 24 * 30);
-          } catch (_) {
-            // Try next candidate.
+        for (final fileName in fileNames) {
+          for (final ext in extensions) {
+            final path = '$prefix/$fileName.$ext';
+            try {
+              return await _client.storage
+                  .from(bucket)
+                  .createSignedUrl(path, 60 * 60 * 24 * 30);
+            } catch (_) {
+              // Try next candidate.
+            }
           }
         }
       }
@@ -625,10 +757,18 @@ class ApiClient {
 
       try {
         await _client.auth.updateUser(UserAttributes(password: next));
-        return;
       } on AuthException catch (error) {
         throw ApiException('Password update failed: ${error.message}');
       }
+
+      // Keep legacy/fallback users-table login in sync with Supabase Auth.
+      final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
+      await _syncUsersPasswordHash(
+        email: email,
+        hashedPassword: hashedPassword,
+        fallbackUserId: user?['id'],
+      );
+      return;
     }
 
     if (!_fallbackAuthenticated) {
@@ -663,6 +803,44 @@ class ApiClient {
         .eq('id', row['id']);
 
     await _loadCurrentUserFromTable(email);
+  }
+
+  Future<void> _syncUsersPasswordHash({
+    required String email,
+    required String hashedPassword,
+    dynamic fallbackUserId,
+  }) async {
+    final payload = {'password': hashedPassword, 'must_change_password': false};
+
+    try {
+      final byEmail = await _client
+          .from('users')
+          .update(payload)
+          .ilike('email', email)
+          .select('id');
+      if (_toMapList(byEmail).isNotEmpty) {
+        await _loadCurrentUserFromTable(email);
+        return;
+      }
+    } catch (_) {
+      // Fall back to ID update below.
+    }
+
+    if (fallbackUserId != null) {
+      final byId = await _client
+          .from('users')
+          .update(payload)
+          .eq('id', fallbackUserId)
+          .select('id');
+      if (_toMapList(byId).isNotEmpty) {
+        await _loadCurrentUserFromTable(email);
+        return;
+      }
+    }
+
+    throw ApiException(
+      'Password changed in Auth, but failed to sync users-table password record.',
+    );
   }
 
   Future<List<Map<String, dynamic>>> getEmployeeCredentials() async {
@@ -838,6 +1016,45 @@ class ApiClient {
     );
   }
 
+  Future<Map<String, dynamic>> submitWfhMonitoring({
+    required dynamic employeeId,
+    required String wfhDate,
+    String? timeIn,
+    String? timeOut,
+    required String filePath,
+  }) async {
+    final payload = <String, dynamic>{
+      'employee_id': employeeId,
+      'wfh_date': wfhDate,
+      'time_in': timeIn,
+      'time_out': timeOut,
+      'file_path': filePath,
+      'status': 'pending',
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
+    // Try common table names used for WFH submissions. Try each until one succeeds.
+    const candidateTables = [
+      'wfh_monitoring_submissions',
+      'wfh_monitorings',
+      'wfh_submissions',
+      'wfh_monitoring',
+    ];
+
+    for (final table in candidateTables) {
+      try {
+        final rows = await _client.from(table).insert(payload).select('id').limit(1);
+        final list = _toMapList(rows);
+        final insertedId = list.isNotEmpty ? list.first['id'] : null;
+        return {'table': table, 'id': insertedId, 'message': 'Submission saved.'};
+      } catch (_) {
+        // Try next candidate.
+      }
+    }
+
+    throw ApiException('Failed to save WFH monitoring submission: no matching table or permission denied.');
+  }
+
   String _contentTypeFromFileName(String fileName) {
     final lower = fileName.toLowerCase();
     if (lower.endsWith('.pdf')) {
@@ -896,6 +1113,44 @@ class ApiClient {
       return null;
     }
 
+    // If DB already stores a complete URL, use it directly.
+    final uri = Uri.tryParse(normalized);
+    if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+      return normalized;
+    }
+
+    // Accept Supabase public object paths like:
+    // /storage/v1/object/public/<bucket>/<object>
+    const publicObjectPrefix = '/storage/v1/object/public/';
+    final publicIdx = normalized.indexOf(publicObjectPrefix);
+    if (publicIdx >= 0) {
+      final tail = normalized.substring(publicIdx + publicObjectPrefix.length);
+      final slash = tail.indexOf('/');
+      if (slash > 0 && slash < tail.length - 1) {
+        final bucket = tail.substring(0, slash);
+        final objectPath = tail.substring(slash + 1);
+        try {
+          return _client.storage.from(bucket).getPublicUrl(objectPath);
+        } catch (_) {
+          // Continue to other formats.
+        }
+      }
+    }
+
+    if (normalized.startsWith('public/')) {
+      final tail = normalized.substring('public/'.length);
+      final slash = tail.indexOf('/');
+      if (slash > 0 && slash < tail.length - 1) {
+        final bucket = tail.substring(0, slash);
+        final objectPath = tail.substring(slash + 1);
+        try {
+          return _client.storage.from(bucket).getPublicUrl(objectPath);
+        } catch (_) {
+          // Continue to other formats.
+        }
+      }
+    }
+
     for (final bucket in _profilePhotoBuckets) {
       if (normalized.startsWith('$bucket/')) {
         final objectPath = normalized.substring(bucket.length + 1);
@@ -927,7 +1182,9 @@ class ApiClient {
 
     // Prefer updating the `employees` row (user requested canonical storage there).
     if (employee == null || employee['id'] == null) {
-      throw ApiException('Employee profile not found while saving profile photo path.');
+      throw ApiException(
+        'Employee profile not found while saving profile photo path.',
+      );
     }
 
     try {

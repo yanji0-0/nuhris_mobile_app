@@ -88,6 +88,12 @@ class _AppDrawerState extends State<AppDrawer> {
                         onTap: () => widget.onSelect(AppNavItem.attendanceDtr),
                       ),
                       _DrawerItem(
+                        icon: Icons.format_list_bulleted,
+                        label: 'WFH Monitoring',
+                        selected: widget.selected == AppNavItem.wfhMonitoring,
+                        onTap: () => widget.onSelect(AppNavItem.wfhMonitoring),
+                      ),
+                      _DrawerItem(
                         icon: Icons.calendar_month_outlined,
                         label: 'Leave Monitoring',
                         selected: widget.selected == AppNavItem.leaveMonitoring,
@@ -202,8 +208,8 @@ class _Header extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: AppColors.nuhrisYellow,
                   borderRadius: BorderRadius.circular(14),
@@ -221,7 +227,7 @@ class _Header extends StatelessWidget {
                   style: TextStyle(
                     color: Color(0xFF0A1B66),
                     fontWeight: FontWeight.w900,
-                    fontSize: 28,
+                    fontSize: 22,
                   ),
                 ),
               ),
@@ -234,7 +240,7 @@ class _Header extends StatelessWidget {
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
-                      fontSize: 34,
+                      fontSize: 22,
                       letterSpacing: 0.2,
                     ),
                   ),

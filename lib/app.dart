@@ -5,6 +5,7 @@ import 'screens/attendance_dtr_screen.dart';
 import 'screens/credentials_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/leave_monitoring_screen.dart';
+import 'screens/wfh_monitoring_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'services/api_client.dart';
 import 'theme/app_theme.dart';
@@ -67,6 +68,10 @@ class _NuhrisEmployeeAppState extends State<NuhrisEmployeeApp> {
           onSignOut: widget.onSignOut,
         ),
         AppNavItem.attendanceDtr => AttendanceDtrScreen(
+          onNavigate: _navigate,
+          onSignOut: widget.onSignOut,
+        ),
+        AppNavItem.wfhMonitoring => WFHMonitoringScreen(
           onNavigate: _navigate,
           onSignOut: widget.onSignOut,
         ),

@@ -532,55 +532,60 @@ class _AccountScreenState extends State<AccountScreen> {
                     style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 14),
-                  const _FieldLabel('Employee Type'),
-                  DropdownButtonFormField<String>(
-                    initialValue: employeeType,
-                    isExpanded: true,
-                    decoration: _inputDecoration(hintText: 'Select type'),
-                    items: employeeTypes
-                        .map(
-                          (option) => DropdownMenuItem(
-                            value: option.value,
-                            child: Text(option.label),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FBFF),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFE1E8F4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'READ ONLY DETAILS',
+                          style: TextStyle(
+                            color: Color(0xFF657A99),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(() => employeeType = v),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Employee ID'),
-                  TextField(
-                    controller: _employeeIdCtrl,
-                    decoration: _inputDecoration(hintText: 'e.g., NU-2025-001'),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Department'),
-                  TextField(
-                    controller: _departmentCtrl,
-                    decoration: _inputDecoration(hintText: 'e.g., SACE'),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Position'),
-                  TextField(
-                    controller: _positionCtrl,
-                    decoration: _inputDecoration(
-                      hintText: 'e.g., Instructor I',
+                        ),
+                        const SizedBox(height: 22),
+                        _ReadOnlyDetailField(
+                          label: 'DEPARTMENT',
+                          value: _departmentCtrl.text,
+                        ),
+                        const SizedBox(height: 18),
+                        _ReadOnlyDetailField(
+                          label: 'POSITION',
+                          value: _positionCtrl.text,
+                        ),
+                        const SizedBox(height: 18),
+                        _ReadOnlyDetailField(
+                          label: 'EMPLOYEE TYPE',
+                          value: _displayEmployeeType(),
+                        ),
+                        const SizedBox(height: 18),
+                        _ReadOnlyDetailField(
+                          label: 'EMPLOYEE ID',
+                          value: _employeeIdCtrl.text,
+                        ),
+                        const SizedBox(height: 18),
+                        _ReadOnlyDetailField(
+                          label: 'DATE HIRED',
+                          value: _dateHiredCtrl.text,
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 16),
                   const _FieldLabel('Phone'),
                   TextField(
                     controller: _phoneCtrl,
                     keyboardType: TextInputType.phone,
                     decoration: _inputDecoration(hintText: 'e.g., 09171234567'),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Date Hired'),
-                  TextField(
-                    controller: _dateHiredCtrl,
-                    readOnly: true,
-                    onTap: _pickDateHired,
-                    decoration: _inputDecoration(hintText: 'mm/dd/yyyy'),
                   ),
                   const SizedBox(height: 10),
                   const _FieldLabel('Address'),
@@ -589,65 +594,66 @@ class _AccountScreenState extends State<AccountScreen> {
                     decoration: _inputDecoration(hintText: 'Home Address'),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    height: 40,
-                    child: ElevatedButton.icon(
-                      onPressed: _isSaving
-                          ? null
-                          : () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              setState(() => _isSaving = true);
-                              try {
-                                await ApiClient.instance.updateAccount({
-                                  'phone': _phoneCtrl.text.trim(),
-                                  'address': _addressCtrl.text.trim(),
-                                  if (employeeType != null)
-                                    'employment_type': employeeType,
-                                });
-                                if (mounted) {
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Account updated successfully.',
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox(
+                      height: 40,
+                      child: ElevatedButton.icon(
+                        onPressed: _isSaving
+                            ? null
+                            : () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                setState(() => _isSaving = true);
+                                try {
+                                  await ApiClient.instance.updateAccount({
+                                    'phone': _phoneCtrl.text.trim(),
+                                    'address': _addressCtrl.text.trim(),
+                                  });
+                                  if (mounted) {
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Account updated successfully.',
+                                        ),
                                       ),
-                                    ),
-                                  );
+                                    );
+                                  }
+                                } catch (error) {
+                                  if (mounted) {
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Save failed: $error'),
+                                      ),
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isSaving = false);
+                                  }
                                 }
-                              } catch (error) {
-                                if (mounted) {
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text('Save failed: $error'),
-                                    ),
-                                  );
-                                }
-                              } finally {
-                                if (mounted) {
-                                  setState(() => _isSaving = false);
-                                }
-                              }
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF014A8D),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF014A8D),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                      ),
-                      icon: _isSaving
-                          ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.save_outlined, size: 18),
-                      label: Text(
-                        _isSaving ? 'Saving...' : 'Save Changes',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        icon: _isSaving
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.save_outlined, size: 18),
+                        label: Text(
+                          _isSaving ? 'Saving...' : 'Save Changes',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),
@@ -745,33 +751,38 @@ class _AccountScreenState extends State<AccountScreen> {
                         ),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    height: 40,
-                    child: ElevatedButton.icon(
-                      onPressed: _isChangingPassword
-                          ? null
-                          : _handleChangePassword,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF014A8D),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox(
+                      height: 40,
+                      child: ElevatedButton.icon(
+                        onPressed: _isChangingPassword
+                            ? null
+                            : _handleChangePassword,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF014A8D),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                      ),
-                      icon: _isChangingPassword
-                          ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.lock_reset, size: 18),
-                      label: Text(
-                        _isChangingPassword ? 'Changing...' : 'Change Password',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        icon: _isChangingPassword
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.lock_reset, size: 18),
+                        label: Text(
+                          _isChangingPassword
+                              ? 'Changing...'
+                              : 'Change Password',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),
@@ -794,6 +805,21 @@ class _AccountScreenState extends State<AccountScreen> {
     }
     return '${date[1]}/${date[2]}/${date[0]}';
   }
+
+  String _displayEmployeeType() {
+    final value = employeeType;
+    if (value == null || value.isEmpty) {
+      return '';
+    }
+
+    for (final option in employeeTypes) {
+      if (option.value == value) {
+        return option.label;
+      }
+    }
+
+    return value;
+  }
 }
 
 class _EmployeeTypeOption {
@@ -812,6 +838,44 @@ class _FieldLabel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+    );
+  }
+}
+
+class _ReadOnlyDetailField extends StatelessWidget {
+  const _ReadOnlyDetailField({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF657A99),
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          value.isEmpty ? '-' : value,
+          style: const TextStyle(
+            color: Colors.black,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            height: 1.25,
+          ),
+        ),
+      ],
     );
   }
 }
