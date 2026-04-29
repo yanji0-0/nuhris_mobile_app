@@ -19,8 +19,6 @@ class AttendanceDtrScreen extends StatefulWidget {
 }
 
 class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
-  String selectedRecord = 'All Records';
-  final List<String> recordFilters = const ['All Records'];
   late Future<List<Map<String, dynamic>>> _future;
 
   @override
@@ -107,6 +105,7 @@ class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final showMobileSchedule = constraints.maxWidth < 700;
+                  final isCompact = constraints.maxWidth < 980;
 
                   return Column(
                     children: [
@@ -114,211 +113,211 @@ class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
                         const _WeeklyScheduleComposer(),
                         const SizedBox(height: 18),
                       ],
-                      Row(
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
                         children: [
-                          Expanded(
-                            child: _MetricCard(
-                              title: 'Tardiness',
-                              value: '${tardiness}m',
-                              icon: Icons.access_time,
-                              iconColor: const Color(0xFFDD6B20),
-                            ),
+                          _MetricCard(
+                            title: 'Tardiness',
+                            value: '${tardiness}m',
+                            icon: Icons.access_time,
+                            iconColor: const Color(0xFF245FD2),
+                            iconBackground: const Color(0xFFE9EFFD),
+                            width: isCompact
+                                ? (constraints.maxWidth - 10) / 2
+                                : (constraints.maxWidth - 20) / 3,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _MetricCard(
-                              title: 'Undertime',
-                              value: '${undertime}m',
-                              icon: Icons.show_chart,
-                              iconColor: const Color(0xFF2F9E44),
-                            ),
+                          _MetricCard(
+                            title: 'Undertime',
+                            value: '${undertime}m',
+                            icon: Icons.schedule,
+                            iconColor: const Color(0xFF1E9A63),
+                            iconBackground: const Color(0xFFEAF7F1),
+                            width: isCompact
+                                ? (constraints.maxWidth - 10) / 2
+                                : (constraints.maxWidth - 20) / 3,
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _MetricCard(
-                              title: 'Overtime',
-                              value: '${overtime}m',
-                              icon: Icons.watch_later_outlined,
-                              iconColor: const Color(0xFF0B3A6E),
-                            ),
+                          _MetricCard(
+                            title: 'Overtime',
+                            value: '${overtime}m',
+                            icon: Icons.watch_later_outlined,
+                            iconColor: const Color(0xFFF08C00),
+                            iconBackground: const Color(0xFFFEF4E7),
+                            width: isCompact
+                                ? (constraints.maxWidth - 10) / 2
+                                : (constraints.maxWidth - 20) / 3,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _MetricCard(
-                              title: 'Absences',
-                              value: absences.toString(),
-                              icon: Icons.warning_amber_rounded,
-                              iconColor: const Color(0xFFE03131),
-                            ),
+                          _MetricCard(
+                            title: 'Absences',
+                            value: absences.toString(),
+                            icon: Icons.warning_amber_rounded,
+                            iconColor: const Color(0xFFE03131),
+                            iconBackground: const Color(0xFFFDECEC),
+                            width: isCompact
+                                ? (constraints.maxWidth - 10) / 2
+                                : (constraints.maxWidth - 10) / 2,
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _MetricCard(
-                              title: 'Records',
-                              value: records.length.toString(),
-                              icon: Icons.event_note_outlined,
-                              iconColor: const Color(0xFF6F42C1),
-                            ),
+                          _MetricCard(
+                            title: 'Workload Credits',
+                            value: records.length.toString(),
+                            icon: Icons.event_note_outlined,
+                            iconColor: const Color(0xFF7B3FE4),
+                            iconBackground: const Color(0xFFF2ECFE),
+                            width: isCompact
+                                ? (constraints.maxWidth - 10) / 2
+                                : (constraints.maxWidth - 10) / 2,
                           ),
-                          const SizedBox(width: 10),
-                          const Expanded(child: SizedBox()),
                         ],
                       ),
                       const SizedBox(height: 18),
                       Card(
+                        elevation: 0,
+                        color: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(18),
+                          side: const BorderSide(color: Color(0xFFD7E0ED)),
                         ),
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Daily Time Records',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF4B4B4B),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              DropdownButtonFormField<String>(
-                                initialValue: selectedRecord,
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
-                                  ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF1F1F1),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(5),
-                                    borderSide: const BorderSide(
-                                      color: Color(0xFFD0D0D0),
-                                    ),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(5),
-                                    borderSide: const BorderSide(
-                                      color: AppColors.primaryBlue,
-                                    ),
-                                  ),
-                                ),
-                                items: recordFilters
-                                    .map(
-                                      (v) => DropdownMenuItem(
-                                        value: v,
-                                        child: Text(v),
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Daily Time Records',
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF0F1D3A),
                                       ),
-                                    )
-                                    .toList(),
-                                onChanged: (v) {
-                                  if (v != null) {
-                                    setState(() => selectedRecord = v);
-                                  }
-                                },
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 12),
-                              Container(
-                                width: double.infinity,
-                                color: const Color(0xFFD8D8D8),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 9,
-                                  horizontal: 6,
-                                ),
-                                child: const Row(
-                                  children: [
-                                    _HeadCell('Date', flex: 2),
-                                    _HeadCell('Time\nIn', flex: 2),
-                                    _HeadCell('Time\nOut', flex: 2),
-                                    _HeadCell('Scheduled', flex: 2),
-                                    _HeadCell('Tardiness', flex: 2),
-                                    _HeadCell('Undertime', flex: 2),
-                                    _HeadCell('OT', flex: 1),
-                                    _HeadCell('Status', flex: 2),
-                                  ],
-                                ),
-                              ),
-                              if (records.isEmpty) ...[
-                                const SizedBox(height: 36),
-                                const Center(
-                                  child: Text(
-                                    'No attendance records found',
-                                    style: TextStyle(
-                                      color: Color(0xFF9EA3AA),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 36),
-                              ] else ...[
-                                const SizedBox(height: 8),
-                                ...records
-                                    .take(20)
-                                    .map(
-                                      (record) => Padding(
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  width: 920,
+                                  child: Column(
+                                    children: [
+                                      Container(
+                                        color: const Color(0xFFF4F7FC),
                                         padding: const EdgeInsets.symmetric(
-                                          vertical: 4,
+                                          vertical: 12,
+                                          horizontal: 6,
                                         ),
-                                        child: Row(
+                                        child: const Row(
                                           children: [
-                                            _BodyCell(
-                                              _formatDate(
-                                                record['record_date'],
-                                              ),
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              _formatTime(record['time_in']),
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              _formatTime(record['time_out']),
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              '${_formatTime(record['scheduled_time_in'])} - ${_formatTime(record['scheduled_time_out'])}',
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              '${_toInt(record['tardiness_minutes'])}m',
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              '${_toInt(record['undertime_minutes'])}m',
-                                              flex: 2,
-                                            ),
-                                            _BodyCell(
-                                              _toInt(
-                                                record['overtime_minutes'],
-                                              ).toString(),
-                                              flex: 1,
-                                            ),
-                                            _BodyCell(
-                                              (record['status'] ?? '')
-                                                  .toString(),
-                                              flex: 2,
-                                            ),
+                                            _HeadCell('Date', flex: 2),
+                                            _HeadCell('Time In', flex: 2),
+                                            _HeadCell('Time Out', flex: 2),
+                                            _HeadCell('Sched.', flex: 2),
+                                            _HeadCell('Tardiness', flex: 2),
+                                            _HeadCell('Undertime', flex: 2),
+                                            _HeadCell('OT', flex: 1),
+                                            _HeadCell('Status', flex: 2),
                                           ],
                                         ),
                                       ),
-                                    ),
-                              ],
+                                      if (records.isEmpty) ...[
+                                        const SizedBox(height: 36),
+                                        const Center(
+                                          child: Text(
+                                            'No attendance records found',
+                                            style: TextStyle(
+                                              color: Color(0xFF9EA3AA),
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 36),
+                                      ] else ...[
+                                        const SizedBox(height: 6),
+                                        ...records
+                                            .take(20)
+                                            .map(
+                                              (record) => Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 2,
+                                                    ),
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 10,
+                                                        horizontal: 4,
+                                                      ),
+                                                  decoration:
+                                                      const BoxDecoration(
+                                                        border: Border(
+                                                          bottom: BorderSide(
+                                                            color: Color(
+                                                              0xFFE4EAF3,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  child: Row(
+                                                    children: [
+                                                      _BodyCell(
+                                                        _formatDate(
+                                                          record['record_date'],
+                                                        ),
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        _formatTime(
+                                                          record['time_in'],
+                                                        ),
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        _formatTime(
+                                                          record['time_out'],
+                                                        ),
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        '${_formatTime(record['scheduled_time_in'])} - ${_formatTime(record['scheduled_time_out'])}',
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        '${_toInt(record['tardiness_minutes'])}m',
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        '${_toInt(record['undertime_minutes'])}m',
+                                                        flex: 2,
+                                                      ),
+                                                      _BodyCell(
+                                                        '${_toInt(record['overtime_minutes'])}m',
+                                                        flex: 1,
+                                                      ),
+                                                      _BodyCell(
+                                                        (record['status'] ?? '')
+                                                            .toString(),
+                                                        flex: 2,
+                                                        isStatus: true,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ),
+                      const SizedBox(height: 14),
+                      const _AttendanceInfoBanner(),
                     ],
                   );
                 },
@@ -339,10 +338,31 @@ class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
 
   String _formatDate(Object? value) {
     final text = (value ?? '').toString();
-    if (text.length >= 10) {
-      return text.substring(0, 10);
+    if (text.length < 10) {
+      return text;
     }
-    return text;
+
+    final datePortion = text.substring(0, 10);
+    final parsed = DateTime.tryParse(datePortion);
+    if (parsed == null) {
+      return datePortion;
+    }
+
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[parsed.month - 1]} ${parsed.day.toString().padLeft(2, '0')}, ${parsed.year}';
   }
 
   String _formatTime(Object? value) {
@@ -350,6 +370,19 @@ class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
     if (text.isEmpty || text == 'null') {
       return '--';
     }
+
+    // Convert 24-hour backend values (e.g. 19:00:00) to 12-hour format.
+    final parts = text.split(':');
+    if (parts.length >= 2) {
+      final hour = int.tryParse(parts[0]);
+      final minute = int.tryParse(parts[1]);
+      if (hour != null && minute != null) {
+        final suffix = hour >= 12 ? 'PM' : 'AM';
+        final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+        return '${hour12.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $suffix';
+      }
+    }
+
     return text;
   }
 }
@@ -360,60 +393,66 @@ class _MetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.iconColor,
+    required this.iconBackground,
+    required this.width,
   });
   final String title;
   final String value;
   final IconData icon;
   final Color iconColor;
+  final Color iconBackground;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final titleSize = width < 380 ? 19.0 : 20.0;
-    final valueSize = width < 380 ? 56.0 : 58.0;
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 138),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return SizedBox(
+      width: width,
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: Color(0xFFD7E0ED)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Row(
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: iconColor, size: 30),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       title,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: titleSize,
-                        color: const Color(0xFF4A4A4A),
-                        height: 1.05,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 22 / 2,
+                        color: Color(0xFF2D3748),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(icon, color: iconColor, size: 28),
-                ],
-              ),
-              const SizedBox(height: 14),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: valueSize,
-                    color: const Color(0xFF2B2D2F),
-                    height: 0.9,
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 44 / 2,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -437,9 +476,9 @@ class _HeadCell extends StatelessWidget {
         text,
         textAlign: TextAlign.center,
         style: const TextStyle(
-          fontSize: 9,
+          fontSize: 22 / 2,
           fontWeight: FontWeight.w700,
-          color: Color(0xFF686868),
+          color: Color(0xFF49556A),
           height: 1.05,
         ),
       ),
@@ -448,10 +487,11 @@ class _HeadCell extends StatelessWidget {
 }
 
 class _BodyCell extends StatelessWidget {
-  const _BodyCell(this.text, {required this.flex});
+  const _BodyCell(this.text, {required this.flex, this.isStatus = false});
 
   final String text;
   final int flex;
+  final bool isStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -460,7 +500,44 @@ class _BodyCell extends StatelessWidget {
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 10, color: Color(0xFF444444)),
+        style: TextStyle(
+          fontSize: 12,
+          color: isStatus ? const Color(0xFF1E9A63) : const Color(0xFF303A4D),
+          fontWeight: isStatus ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+}
+
+class _AttendanceInfoBanner extends StatelessWidget {
+  const _AttendanceInfoBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF1FF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFC8D8FF)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: const Row(
+        children: [
+          Icon(Icons.info, color: Color(0xFF245FD2), size: 30),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Attendance records and DTR are subject to HR review and approval.',
+              style: TextStyle(
+                color: Color(0xFF245FD2),
+                fontSize: 24 / 2,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -475,11 +552,7 @@ class _WeeklyScheduleComposer extends StatefulWidget {
 }
 
 class _WeeklyScheduleComposerState extends State<_WeeklyScheduleComposer> {
-  static const List<String> _terms = [
-    '1st Term',
-    '2nd Term',
-    '3rd Term',
-  ];
+  static const List<String> _terms = ['1st Term', '2nd Term', '3rd Term'];
 
   late String _selectedTerm;
   late final List<_ScheduleDayState> _days;
