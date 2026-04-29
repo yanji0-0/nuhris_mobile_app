@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../navigation/app_nav.dart';
 import '../services/api_client.dart';
@@ -262,6 +264,135 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _viewFile(Map<String, dynamic> item) async {
+    final stored = (item['file_path'] ?? '').toString();
+    if (stored.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No file attached to this credential.')),
+      );
+      return;
+    }
+
+    try {
+      final url = await ApiClient.instance.getCredentialFileUrl(stored);
+      if (url == null || url.isEmpty) {
+        if (!context.mounted) return;
+        
+        // Show debug info about what was tried
+        final debugMsg = 'File not found. Stored path: $stored\n'
+            'Tried all known credential storage buckets. '
+            'The bucket may not exist or the file may have been deleted.';
+        
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('File Not Found'),
+            content: Text(debugMsg),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+            ],
+          ),
+        );
+        return;
+      }
+
+      final lower = url.toLowerCase();
+      if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.contains('image/')) {
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          builder: (_) => Dialog(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Expanded(
+                  child: InteractiveViewer(
+                    child: Image.network(url, fit: BoxFit.contain,
+                      errorBuilder: (ctx, err, stack) => Center(
+                        child: Text('Unable to load image:\n$err'),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      if (await canLaunchUrl(Uri.parse(url))) {
+                        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        if (context.mounted) Navigator.pop(context);
+                      }
+                    },
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Open in Browser'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        return;
+      }
+
+      // For PDFs and documents, open directly
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open file. No suitable app found.')),
+        );
+      }
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to open file: $error')),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteCredential(Map<String, dynamic> item) async {
+    final confirmed = await showDialog<bool?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete credential'),
+        content: const Text('Are you sure you want to delete this credential? This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final id = item['id'];
+      final filePath = (item['file_path'] ?? '').toString();
+      await ApiClient.instance.deleteEmployeeCredential(
+        id: id,
+        filePath: filePath.isEmpty ? null : filePath,
+      );
+
+      // Reload from server and verify row is actually gone to avoid false success.
+      await _loadCredentials();
+      final stillExists = _credentials.any((c) => c['id'] == id);
+      if (stillExists) {
+        throw Exception(
+          'Delete did not apply on server. Your account may not have DELETE permission for this credential.',
+        );
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Credential deleted.')),
+      );
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete credential: $error')),
+      );
+    }
   }
 
   @override
@@ -567,6 +698,50 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                     ),
                                   ],
                                 ),
+                              ),
+                              const SizedBox(width: 8),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    height: 36,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _viewFile(item),
+                                      icon: const Icon(
+                                        Icons.remove_red_eye_outlined,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'View file',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        side: const BorderSide(color: Color(0xFFE6ECF6)),
+                                        foregroundColor: const Color(0xFF2B2F36),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    height: 36,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _confirmDeleteCredential(item),
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 16,
+                                        color: Color(0xFFB3261E),
+                                      ),
+                                      label: const Text(
+                                        'Delete',
+                                        style: TextStyle(fontSize: 13, color: Color(0xFFB3261E)),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        side: const BorderSide(color: Color(0xFFF6D0D6)),
+                                        foregroundColor: const Color(0xFFB3261E),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

@@ -860,6 +860,120 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  Future<String?> getCredentialFileUrl(String storedPath) async {
+    final normalized = storedPath.trim();
+    if (normalized.isEmpty) return null;
+
+    // If it's already a full URL, return it.
+    final uri = Uri.tryParse(normalized);
+    if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+      return normalized;
+    }
+
+    // Reuse existing logic for common stored-path patterns (profile photo style).
+    final fromProfile = await _tryCreateSignedUrlFromStoredPath(normalized);
+    if (fromProfile != null) return fromProfile;
+
+    // Try to parse as "bucket/object" if a slash exists.
+    final firstSlash = normalized.indexOf('/');
+    if (firstSlash > 0 && firstSlash < normalized.length - 1) {
+      final possibleBucket = normalized.substring(0, firstSlash);
+      final object = normalized.substring(firstSlash + 1);
+      
+      // If the first part looks like a bucket name (in our list), try it.
+      if (_credentialFilesBuckets.contains(possibleBucket)) {
+        try {
+          return _client.storage.from(possibleBucket).getPublicUrl(object);
+        } catch (_) {
+          try {
+            return await _client.storage.from(possibleBucket).createSignedUrl(object, 60 * 60 * 24 * 30);
+          } catch (_) {
+            // Fallback to trying other buckets below
+          }
+        }
+      }
+    }
+
+    // Try the entire path across all known credential buckets.
+    // This handles cases where the stored path is "employee-XX/timestamp_file.pdf"
+    // and doesn't include a bucket prefix.
+    for (final bucket in _credentialFilesBuckets) {
+      try {
+        // Try public URL first (faster)
+        return _client.storage.from(bucket).getPublicUrl(normalized);
+      } catch (_) {
+        // Try next bucket
+      }
+    }
+
+    // Last resort: try signed URLs in case RLS blocks public access
+    for (final bucket in _credentialFilesBuckets) {
+      try {
+        return await _client.storage.from(bucket).createSignedUrl(normalized, 60 * 60 * 24 * 30);
+      } catch (_) {
+        // Try next bucket
+      }
+    }
+
+    return null;
+  }
+
+  Future<List<String>> _listAvailableBuckets() async {
+    try {
+      final buckets = await _client.storage.listBuckets();
+      return buckets.map((b) => b.name).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> deleteEmployeeCredential({required dynamic id, String? filePath}) async {
+    try {
+      await _client.from('employee_credentials').delete().eq('id', id);
+    } catch (error) {
+      throw ApiException('Failed to delete credential: $error');
+    }
+
+    final deletedFilePath = (filePath ?? '').toString().trim();
+    if (deletedFilePath.isEmpty) {
+      return;
+    }
+
+    if (deletedFilePath.startsWith('http://') ||
+        deletedFilePath.startsWith('https://')) {
+      return;
+    }
+
+    final normalized = deletedFilePath;
+    final slash = normalized.indexOf('/');
+    if (slash <= 0 || slash >= normalized.length - 1) {
+      return;
+    }
+
+    final maybeBucket = normalized.substring(0, slash);
+    final objectTail = normalized.substring(slash + 1);
+
+    final targetBuckets = <String>[];
+    if (_credentialFilesBuckets.contains(maybeBucket)) {
+      targetBuckets.add(maybeBucket);
+    }
+    for (final bucket in _credentialFilesBuckets) {
+      if (!targetBuckets.contains(bucket)) {
+        targetBuckets.add(bucket);
+      }
+    }
+
+    for (final bucket in targetBuckets) {
+      final objectPath = bucket == maybeBucket ? objectTail : normalized;
+      try {
+        await _client.storage.from(bucket).remove([objectPath]);
+        break;
+      } catch (_) {
+        // Best-effort cleanup only.
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> createEmployeeCredential(
     Map<String, dynamic> payload,
   ) async {
