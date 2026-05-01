@@ -168,7 +168,7 @@ class ApiClient {
 
     final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
     final credentialRows = await _queryEmployeeCredentials(
-      select: 'id,status,expires_at',
+      select: 'id,status,credential_type,expires_at,created_at',
       employeeIdentifiers: credentialIdentifiers,
     );
 
@@ -207,33 +207,118 @@ class ApiClient {
       'non_compliant',
     };
 
-    final activeCredentials = credentialRows.whereType<Map>().where((row) {
+    bool isExpiredCredential(Map row) {
+      final rawType = (row['credential_type'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
       final status = (row['status'] ?? '').toString().trim().toLowerCase();
-      if (status.isEmpty) {
+      if (nonCompliantStatuses.contains(status)) {
         return true;
       }
-      return !nonCompliantStatuses.contains(status);
+
+      final expiresAtRaw = (row['expires_at'] ?? '').toString().trim();
+      final createdAtRaw = (row['created_at'] ?? '').toString().trim();
+      final expiresAt = DateTime.tryParse(expiresAtRaw);
+      final createdAt = DateTime.tryParse(createdAtRaw);
+
+      DateTime? effectiveExpiresAt;
+      if (rawType == 'resume' || rawType.contains('resume')) {
+        if (expiresAt != null &&
+            createdAt != null &&
+            expiresAt.year == createdAt.year &&
+            expiresAt.month == createdAt.month &&
+            expiresAt.day == createdAt.day) {
+          effectiveExpiresAt = DateTime(
+            createdAt.year + 1,
+            createdAt.month,
+            createdAt.day,
+          );
+        } else {
+          effectiveExpiresAt =
+              expiresAt ?? createdAt?.add(const Duration(days: 365));
+        }
+      } else if (rawType == 'prc' || rawType.contains('prc license')) {
+        effectiveExpiresAt = expiresAt;
+      } else {
+        effectiveExpiresAt = expiresAt;
+      }
+
+      if (effectiveExpiresAt == null) {
+        return false;
+      }
+
+      final now = DateTime.now();
+      return effectiveExpiresAt.isBefore(
+        DateTime(now.year, now.month, now.day),
+      );
+    }
+
+    bool isExpiringSoonCredential(Map row) {
+      final rawType = (row['credential_type'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final thresholdDays = rawType == 'resume' || rawType.contains('resume')
+          ? 30
+          : rawType == 'prc' || rawType.contains('prc license')
+          ? 90
+          : null;
+      if (thresholdDays == null) {
+        return false;
+      }
+
+      final expiresAtRaw = (row['expires_at'] ?? '').toString().trim();
+      final createdAtRaw = (row['created_at'] ?? '').toString().trim();
+      final expiresAt = DateTime.tryParse(expiresAtRaw);
+      final createdAt = DateTime.tryParse(createdAtRaw);
+
+      DateTime? effectiveExpiresAt;
+      if (rawType == 'resume' || rawType.contains('resume')) {
+        if (expiresAt != null &&
+            createdAt != null &&
+            expiresAt.year == createdAt.year &&
+            expiresAt.month == createdAt.month &&
+            expiresAt.day == createdAt.day) {
+          effectiveExpiresAt = DateTime(
+            createdAt.year + 1,
+            createdAt.month,
+            createdAt.day,
+          );
+        } else {
+          effectiveExpiresAt =
+              expiresAt ?? createdAt?.add(const Duration(days: 365));
+        }
+      } else {
+        effectiveExpiresAt = expiresAt;
+      }
+
+      if (effectiveExpiresAt == null) {
+        return false;
+      }
+
+      final now = DateTime.now();
+      final startOfToday = DateTime(now.year, now.month, now.day);
+      if (effectiveExpiresAt.isBefore(startOfToday)) {
+        return false;
+      }
+
+      final warningEnd = startOfToday.add(Duration(days: thresholdDays));
+      return !effectiveExpiresAt.isAfter(warningEnd);
+    }
+
+    final activeCredentials = credentialRows.whereType<Map>().where((row) {
+      return !isExpiredCredential(row.cast<String, dynamic>());
     }).length;
 
     final nonCompliantCredentials = credentialRows.whereType<Map>().where((
       row,
     ) {
-      final status = (row['status'] ?? '').toString().trim().toLowerCase();
-      return nonCompliantStatuses.contains(status);
+      return isExpiredCredential(row.cast<String, dynamic>());
     }).length;
 
-    final now = DateTime.now();
     final expiringSoon = credentialRows.whereType<Map>().where((row) {
-      final raw = (row['expires_at'] ?? '').toString();
-      if (raw.isEmpty) {
-        return false;
-      }
-      final date = DateTime.tryParse(raw);
-      if (date == null || date.isBefore(now)) {
-        return false;
-      }
-      final days = date.difference(now).inDays;
-      return days <= 30;
+      return isExpiringSoonCredential(row.cast<String, dynamic>());
     }).length;
 
     final unreadNotifications = notificationRows
@@ -482,10 +567,33 @@ class ApiClient {
     try {
       await _client
           .from('announcement_notifications')
-          .update({'is_read': true, 'read_at': DateTime.now().toIso8601String()})
+          .update({
+            'is_read': true,
+            'read_at': DateTime.now().toIso8601String(),
+          })
           .eq('user_id', user['id']);
     } catch (error) {
       throw ApiException('Failed to mark notifications read: $error');
+    }
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    final user = await _currentUserRow();
+    if (user == null || user['id'] == null) {
+      throw ApiException('User profile not found.');
+    }
+
+    try {
+      await _client
+          .from('announcement_notifications')
+          .update({
+            'is_read': true,
+            'read_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', notificationId)
+          .eq('user_id', user['id']);
+    } catch (error) {
+      throw ApiException('Failed to mark notification read: $error');
     }
   }
 
@@ -852,7 +960,7 @@ class ApiClient {
     final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
     final rows = await _queryEmployeeCredentials(
       select:
-          'id,employee_id,credential_type,title,department_id,expires_at,description,file_path,status,created_at,updated_at',
+          'id,employee_id,credential_type,title,department_id,expires_at,description,file_path,status,review_notes,created_at,updated_at',
       employeeIdentifiers: credentialIdentifiers,
       orderByCreatedAtDesc: true,
     );
@@ -879,14 +987,16 @@ class ApiClient {
     if (firstSlash > 0 && firstSlash < normalized.length - 1) {
       final possibleBucket = normalized.substring(0, firstSlash);
       final object = normalized.substring(firstSlash + 1);
-      
+
       // If the first part looks like a bucket name (in our list), try it.
       if (_credentialFilesBuckets.contains(possibleBucket)) {
         try {
           return _client.storage.from(possibleBucket).getPublicUrl(object);
         } catch (_) {
           try {
-            return await _client.storage.from(possibleBucket).createSignedUrl(object, 60 * 60 * 24 * 30);
+            return await _client.storage
+                .from(possibleBucket)
+                .createSignedUrl(object, 60 * 60 * 24 * 30);
           } catch (_) {
             // Fallback to trying other buckets below
           }
@@ -909,7 +1019,9 @@ class ApiClient {
     // Last resort: try signed URLs in case RLS blocks public access
     for (final bucket in _credentialFilesBuckets) {
       try {
-        return await _client.storage.from(bucket).createSignedUrl(normalized, 60 * 60 * 24 * 30);
+        return await _client.storage
+            .from(bucket)
+            .createSignedUrl(normalized, 60 * 60 * 24 * 30);
       } catch (_) {
         // Try next bucket
       }
@@ -927,7 +1039,10 @@ class ApiClient {
     }
   }
 
-  Future<void> deleteEmployeeCredential({required dynamic id, String? filePath}) async {
+  Future<void> deleteEmployeeCredential({
+    required dynamic id,
+    String? filePath,
+  }) async {
     try {
       await _client.from('employee_credentials').delete().eq('id', id);
     } catch (error) {
@@ -1137,36 +1252,58 @@ class ApiClient {
     String? timeOut,
     required String filePath,
   }) async {
+    // Get the current user to populate submitted_by
+    final user = await _currentUserRow();
+    if (user == null || user['id'] == null) {
+      throw ApiException('User not authenticated.');
+    }
+
+    final now = DateTime.now().toIso8601String();
     final payload = <String, dynamic>{
       'employee_id': employeeId,
+      'submitted_by': user['id'],
       'wfh_date': wfhDate,
       'time_in': timeIn,
       'time_out': timeOut,
       'file_path': filePath,
       'status': 'pending',
-      'created_at': DateTime.now().toIso8601String(),
+      'submitted_at': now,
+      'created_at': now,
+      'updated_at': now,
     };
 
-    // Try common table names used for WFH submissions. Try each until one succeeds.
-    const candidateTables = [
-      'wfh_monitoring_submissions',
-      'wfh_monitorings',
-      'wfh_submissions',
-      'wfh_monitoring',
-    ];
+    try {
+      final rows = await _client
+          .from('wfh_monitoring_submissions')
+          .insert(payload)
+          .select('id')
+          .limit(1);
+      final list = _toMapList(rows);
+      final insertedId = list.isNotEmpty ? list.first['id'] : null;
+      return {'id': insertedId, 'message': 'Submission saved.'};
+    } catch (error) {
+      throw ApiException('Failed to save WFH monitoring submission: $error');
+    }
+  }
 
-    for (final table in candidateTables) {
-      try {
-        final rows = await _client.from(table).insert(payload).select('id').limit(1);
-        final list = _toMapList(rows);
-        final insertedId = list.isNotEmpty ? list.first['id'] : null;
-        return {'table': table, 'id': insertedId, 'message': 'Submission saved.'};
-      } catch (_) {
-        // Try next candidate.
-      }
+  Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() async {
+    final employee = await _currentEmployee();
+    if (employee == null || employee['id'] == null) {
+      throw ApiException('Employee profile not found.');
     }
 
-    throw ApiException('Failed to save WFH monitoring submission: no matching table or permission denied.');
+    final employeeId = employee['id'];
+
+    try {
+      final rows = await _client
+          .from('wfh_monitoring_submissions')
+          .select('*')
+          .eq('employee_id', employeeId)
+          .order('submitted_at', ascending: false);
+      return _toMapList(rows);
+    } catch (error) {
+      throw ApiException('Failed to fetch WFH monitoring submissions: $error');
+    }
   }
 
   String _contentTypeFromFileName(String fileName) {

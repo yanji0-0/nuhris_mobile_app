@@ -89,8 +89,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _loadNotifications();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark all read: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark all read: $error')),
+      );
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _markNotificationRead(String notificationId) async {
+    try {
+      await ApiClient.instance.markNotificationRead(notificationId);
+      await _loadNotifications();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark notification read: $error')),
+      );
     }
   }
 
@@ -101,7 +115,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _loadNotifications();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to clear notifications: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to clear notifications: $error')),
+      );
       setState(() => _isLoading = false);
     }
   }
@@ -182,78 +198,93 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.only(top: 60),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 60),
-              child: Center(
-                child: Text('Failed to load notifications: $_error'),
-              ),
-            )
-          else ...[
-            // Header actions: Read All and Clear All
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _markAllRead,
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: AppColors.primaryBlue,
-                    side: const BorderSide(color: Color(0xFFCCD6E6)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              if (_isLoading)
+                const Padding(
+                  padding: EdgeInsets.only(top: 60),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 60),
+                  child: Center(
+                    child: Text('Failed to load notifications: $_error'),
                   ),
-                  child: const Text('Read All'),
+                )
+              else ...[
+                // Header actions: Read All and Clear All
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _markAllRead,
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: AppColors.primaryBlue,
+                        side: const BorderSide(color: Color(0xFFCCD6E6)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      child: const Text('Read All'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: _clearAll,
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF374151),
+                        side: const BorderSide(color: Color(0xFFCCD6E6)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      child: const Text('Clear All'),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: _clearAll,
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF374151),
-                    side: const BorderSide(color: Color(0xFFCCD6E6)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                const SizedBox(height: 16),
+                if (list.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 30,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFE6ECF6)),
+                    ),
+                    child: const Text(
+                      'No notifications found.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF92A0B5),
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  )
+                else
+                  ...list.map(
+                    (n) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _NotificationCard(
+                        item: n,
+                        onTap: n.isRead
+                            ? null
+                            : () => _markNotificationRead(n.id),
+                      ),
+                    ),
                   ),
-                  child: const Text('Clear All'),
-                ),
               ],
-            ),
-            const SizedBox(height: 16),
-            if (list.isEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 30,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE6ECF6)),
-                ),
-                child: const Text(
-                  'No notifications found.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFF92A0B5),
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-                ),
-              )
-            else
-              ...list.map(
-                (n) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _NotificationCard(item: n),
-                ),
-              ),
-            ],
             ],
           ),
         ),
@@ -287,8 +318,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 }
 
 class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.item});
+  const _NotificationCard({required this.item, this.onTap});
   final _NotifItem item;
+  final VoidCallback? onTap;
 
   Color _getIconBackground(String priority) {
     switch (priority.toLowerCase()) {
@@ -314,138 +346,147 @@ class _NotificationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: EdgeInsets.zero,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE6ECF6)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0B0B1E43),
-            blurRadius: 14,
-            offset: Offset(0, 6),
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: item.isRead ? 0.55 : 1.0,
+        child: Container(
+          margin: EdgeInsets.zero,
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE6ECF6)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0B0B1E43),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: _getIconBackground(item.priority),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              item.icon,
-              color: _getIconColor(item.priority),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: _getIconBackground(item.priority),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  item.icon,
+                  color: _getIconColor(item.priority),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFF141B2E),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                      const SizedBox(width: 8),
-                      if (item.isRead != true) ...[
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE1F0FF),
-                            borderRadius: BorderRadius.circular(12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF141B2E),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                          child: const Text(
-                            'UNREAD',
+                        ),
+                        const SizedBox(width: 8),
+                        if (item.isRead != true) ...[
+                          Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE1F0FF),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'UNREAD',
+                              style: TextStyle(
+                                color: Color(0xFF2673EC),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: item.priorityColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            item.priority.toUpperCase(),
                             style: TextStyle(
-                              color: Color(0xFF2673EC),
-                              fontSize: 11,
+                              color: item.priorityTextColor,
+                              fontSize: 10,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                       ],
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item.message,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF2A324A),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                       ),
-                      decoration: BoxDecoration(
-                        color: item.priorityColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        item.priority.toUpperCase(),
-                        style: TextStyle(
-                          color: item.priorityTextColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today_outlined,
+                          size: 14,
+                          color: Color(0xFF7B879C),
                         ),
-                      ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            item.dateText,
+                            style: const TextStyle(
+                              color: Color(0xFF4C5A73),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: Color(0xFF8A95A8),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  item.message,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFF2A324A),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.calendar_today_outlined,
-                      size: 14,
-                      color: Color(0xFF7B879C),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        item.dateText,
-                        style: const TextStyle(
-                          color: Color(0xFF4C5A73),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.chevron_right_rounded,
-                      size: 18,
-                      color: Color(0xFF8A95A8),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

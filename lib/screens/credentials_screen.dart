@@ -47,6 +47,21 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       if (!mounted) {
         return;
       }
+      // Sort newest first (use updated_at then created_at)
+      data.sort((a, b) {
+        DateTime parseDate(Map<String, dynamic> item) {
+          final updated = (item['updated_at'] ?? '').toString();
+          final created = (item['created_at'] ?? '').toString();
+          return DateTime.tryParse(updated) ??
+              DateTime.tryParse(created) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+        }
+
+        final da = parseDate(a.cast<String, dynamic>());
+        final db = parseDate(b.cast<String, dynamic>());
+        return db.compareTo(da);
+      });
+
       setState(() {
         _credentials = data;
         _isLoading = false;
@@ -206,6 +221,70 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     );
   }
 
+  DateTime? _parseDate(Object? value) {
+    final text = (value ?? '').toString().trim();
+    if (text.isEmpty) return null;
+    return DateTime.tryParse(text);
+  }
+
+  DateTime? _effectiveExpiresAt(Map<String, dynamic> item) {
+    final rawType = (item['credential_type'] ?? '').toString();
+    final normalizedType = _normalizeCredentialType(rawType);
+    if (normalizedType != 'resume' && normalizedType != 'prc') return null;
+
+    final expiresAt = _parseDate(item['expires_at']);
+    if (normalizedType == 'prc') return expiresAt;
+
+    final createdAt = _parseDate(item['created_at']);
+    if (expiresAt == null) return createdAt?.add(const Duration(days: 365));
+
+    if (createdAt != null &&
+        expiresAt.year == createdAt.year &&
+        expiresAt.month == createdAt.month &&
+        expiresAt.day == createdAt.day) {
+      return createdAt.add(const Duration(days: 365));
+    }
+
+    return expiresAt;
+  }
+
+  _ExpiryBadgeStyle? _expiryBadgeStyle(Map<String, dynamic> item) {
+    final rawType = (item['credential_type'] ?? '').toString();
+    final normalizedType = _normalizeCredentialType(rawType);
+    final thresholdDays = switch (normalizedType) {
+      'resume' => 30,
+      'prc' => 90,
+      _ => null,
+    };
+    if (thresholdDays == null) return null;
+
+    final expiresAt = _effectiveExpiresAt(item);
+    if (expiresAt == null) return null;
+
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final expiryDate = DateTime(expiresAt.year, expiresAt.month, expiresAt.day);
+
+    if (expiryDate.isBefore(startOfToday)) {
+      return const _ExpiryBadgeStyle(
+        label: 'Expired',
+        background: Color(0xFFFADADD),
+        foreground: Color(0xFFB3261E),
+      );
+    }
+
+    final warningEnd = startOfToday.add(Duration(days: thresholdDays));
+    if (!expiryDate.isAfter(warningEnd)) {
+      return const _ExpiryBadgeStyle(
+        label: 'Expiring Soon',
+        background: Color(0xFFFCECC2),
+        foreground: Color(0xFF9A6A00),
+      );
+    }
+
+    return null;
+  }
+
   String _formatDate(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
@@ -254,6 +333,74 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     return 'No date';
   }
 
+  String _optionalDate(Object? value) {
+    final text = (value ?? '').toString().trim();
+    if (text.isEmpty) return '-';
+
+    final parsed = DateTime.tryParse(text);
+    if (parsed == null) return text;
+
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    return '${months[parsed.month - 1]} ${parsed.day}, ${parsed.year}';
+  }
+
+  String _effectiveCredentialExpiration(Map<String, dynamic> item) {
+    final rawType = (item['credential_type'] ?? '').toString();
+    final normalized = _normalizeCredentialType(rawType);
+    final expiresAt = (item['expires_at'] ?? '').toString().trim();
+    final createdAt = (item['created_at'] ?? '').toString().trim();
+
+    if (normalized != 'resume' && normalized != 'prc') return '-';
+
+    if (expiresAt.isEmpty) {
+      if (normalized == 'resume' && createdAt.isNotEmpty) {
+        final created = DateTime.tryParse(createdAt);
+        if (created != null) {
+          final effective = created.add(const Duration(days: 365));
+          return _optionalDate(effective.toIso8601String());
+        }
+      }
+      return '-';
+    }
+
+    final parsedExpires = DateTime.tryParse(expiresAt);
+    final parsedCreated = DateTime.tryParse(createdAt);
+    if (normalized == 'resume' &&
+        parsedExpires != null &&
+        parsedCreated != null &&
+        parsedExpires.year == parsedCreated.year &&
+        parsedExpires.month == parsedCreated.month &&
+        parsedExpires.day == parsedCreated.day) {
+      final effective = parsedCreated.add(const Duration(days: 365));
+      return _optionalDate(effective.toIso8601String());
+    }
+
+    return _optionalDate(expiresAt);
+  }
+
+  String _lastUpdateLabel(Map<String, dynamic> item) {
+    return _optionalDate(item['updated_at']);
+  }
+
+  String _hrNoteLabel(Map<String, dynamic> item) {
+    final note = (item['review_notes'] ?? '').toString().trim();
+    return note.isEmpty ? '-' : note;
+  }
+
   void _openUploadScreen() {
     Navigator.push(
       context,
@@ -279,19 +426,23 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       final url = await ApiClient.instance.getCredentialFileUrl(stored);
       if (url == null || url.isEmpty) {
         if (!context.mounted) return;
-        
+
         // Show debug info about what was tried
-        final debugMsg = 'File not found. Stored path: $stored\n'
+        final debugMsg =
+            'File not found. Stored path: $stored\n'
             'Tried all known credential storage buckets. '
             'The bucket may not exist or the file may have been deleted.';
-        
+
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('File Not Found'),
             content: Text(debugMsg),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
@@ -299,7 +450,10 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       }
 
       final lower = url.toLowerCase();
-      if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.contains('image/')) {
+      if (lower.endsWith('.png') ||
+          lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.contains('image/')) {
         if (!context.mounted) return;
         showDialog(
           context: context,
@@ -309,10 +463,11 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
               children: [
                 Expanded(
                   child: InteractiveViewer(
-                    child: Image.network(url, fit: BoxFit.contain,
-                      errorBuilder: (ctx, err, stack) => Center(
-                        child: Text('Unable to load image:\n$err'),
-                      ),
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (ctx, err, stack) =>
+                          Center(child: Text('Unable to load image:\n$err')),
                     ),
                   ),
                 ),
@@ -321,7 +476,10 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () async {
                       if (await canLaunchUrl(Uri.parse(url))) {
-                        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        await launchUrl(
+                          Uri.parse(url),
+                          mode: LaunchMode.externalApplication,
+                        );
                         if (context.mounted) Navigator.pop(context);
                       }
                     },
@@ -342,14 +500,16 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       } else {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to open file. No suitable app found.')),
+          const SnackBar(
+            content: Text('Unable to open file. No suitable app found.'),
+          ),
         );
       }
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to open file: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to open file: $error')));
     }
   }
 
@@ -358,10 +518,18 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete credential'),
-        content: const Text('Are you sure you want to delete this credential? This action cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this credential? This action cannot be undone.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -385,9 +553,9 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         );
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Credential deleted.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Credential deleted.')));
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to delete credential: $error')),
@@ -584,6 +752,12 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                         final badgeStyle = _statusBadgeStyle(
                           (item['status'] ?? 'pending').toString(),
                         );
+                        final expiryBadgeStyle = _expiryBadgeStyle(item);
+                        final expirationDate = _effectiveCredentialExpiration(
+                          item,
+                        );
+                        final lastUpdate = _lastUpdateLabel(item);
+                        final hrNote = _hrNoteLabel(item);
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
@@ -638,24 +812,28 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 5,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: badgeStyle.background,
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            badgeStyle.label,
-                                            style: TextStyle(
-                                              color: badgeStyle.foreground,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
-                                            ),
+                                        Flexible(
+                                          child: Wrap(
+                                            alignment: WrapAlignment.end,
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: [
+                                              _BadgePill(
+                                                label: badgeStyle.label,
+                                                background:
+                                                    badgeStyle.background,
+                                                foreground:
+                                                    badgeStyle.foreground,
+                                              ),
+                                              if (expiryBadgeStyle != null)
+                                                _BadgePill(
+                                                  label: expiryBadgeStyle.label,
+                                                  background: expiryBadgeStyle
+                                                      .background,
+                                                  foreground: expiryBadgeStyle
+                                                      .foreground,
+                                                ),
+                                            ],
                                           ),
                                         ),
                                       ],
@@ -696,6 +874,22 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                         ),
                                       ],
                                     ),
+                                    const SizedBox(height: 8),
+                                    _MetaLine(
+                                      label: 'Expiration',
+                                      value: expirationDate,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _MetaLine(
+                                      label: 'Last update',
+                                      value: lastUpdate,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _MetaLine(
+                                      label: 'HR Note',
+                                      value: hrNote,
+                                      maxLines: 2,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -716,8 +910,12 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                         style: TextStyle(fontSize: 13),
                                       ),
                                       style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(color: Color(0xFFE6ECF6)),
-                                        foregroundColor: const Color(0xFF2B2F36),
+                                        side: const BorderSide(
+                                          color: Color(0xFFE6ECF6),
+                                        ),
+                                        foregroundColor: const Color(
+                                          0xFF2B2F36,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -725,7 +923,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                   SizedBox(
                                     height: 36,
                                     child: OutlinedButton.icon(
-                                      onPressed: () => _confirmDeleteCredential(item),
+                                      onPressed: () =>
+                                          _confirmDeleteCredential(item),
                                       icon: const Icon(
                                         Icons.delete_outline,
                                         size: 16,
@@ -733,11 +932,18 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                                       ),
                                       label: const Text(
                                         'Delete',
-                                        style: TextStyle(fontSize: 13, color: Color(0xFFB3261E)),
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFFB3261E),
+                                        ),
                                       ),
                                       style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(color: Color(0xFFF6D0D6)),
-                                        foregroundColor: const Color(0xFFB3261E),
+                                        side: const BorderSide(
+                                          color: Color(0xFFF6D0D6),
+                                        ),
+                                        foregroundColor: const Color(
+                                          0xFFB3261E,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -777,4 +983,88 @@ class _CredentialTypeStyle {
   final IconData icon;
   final Color background;
   final Color foreground;
+}
+
+class _ExpiryBadgeStyle {
+  const _ExpiryBadgeStyle({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+}
+
+class _BadgePill extends StatelessWidget {
+  const _BadgePill({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaLine extends StatelessWidget {
+  const _MetaLine({
+    required this.label,
+    required this.value,
+    this.maxLines = 1,
+  });
+
+  final String label;
+  final String value;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            color: Color(0xFF6C788D),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: maxLines,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF334155),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
