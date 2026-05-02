@@ -213,6 +213,19 @@ class ApiClient implements AppApiClient {
       'non_compliant',
     };
 
+    bool isApprovedCredential(Map row) {
+      final status = (row['status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+      return status.isEmpty ||
+        status == 'verified' ||
+        status == 'approved' ||
+        status == 'active' ||
+        status == 'compliant' ||
+        status == 'valid';
+    }
+
     bool isExpiredCredential(Map row) {
       final rawType = (row['credential_type'] ?? '')
           .toString()
@@ -314,17 +327,37 @@ class ApiClient implements AppApiClient {
     }
 
     final activeCredentials = credentialRows.whereType<Map>().where((row) {
-      return !isExpiredCredential(row.cast<String, dynamic>());
+      final item = row.cast<String, dynamic>();
+      return isApprovedCredential(item) && !isExpiredCredential(item);
+    }).length;
+
+    final expiringSoon = credentialRows.whereType<Map>().where((row) {
+      final item = row.cast<String, dynamic>();
+      return isApprovedCredential(item) && isExpiringSoonCredential(item);
+    }).length;
+
+    final pendingReviewCredentials = credentialRows.whereType<Map>().where((
+      row,
+    ) {
+      final status = (row['status'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      return status == 'pending';
+    }).length;
+
+    final compliantCredentials = credentialRows.whereType<Map>().where((row) {
+      final item = row.cast<String, dynamic>();
+      return isApprovedCredential(item) &&
+          !isExpiredCredential(item) &&
+          !isExpiringSoonCredential(item);
     }).length;
 
     final nonCompliantCredentials = credentialRows.whereType<Map>().where((
       row,
     ) {
-      return isExpiredCredential(row.cast<String, dynamic>());
-    }).length;
-
-    final expiringSoon = credentialRows.whereType<Map>().where((row) {
-      return isExpiringSoonCredential(row.cast<String, dynamic>());
+      final item = row.cast<String, dynamic>();
+      return !isApprovedCredential(item) || isExpiredCredential(item);
     }).length;
 
     final unreadNotifications = notificationRows
@@ -355,9 +388,10 @@ class ApiClient implements AppApiClient {
       'credentials_summary': {
         'total_count': credentialRows.length,
         'active_count': activeCredentials,
+        'pending_review_count': pendingReviewCredentials,
         'expiring_soon_count': expiringSoon,
         'non_compliant_count': nonCompliantCredentials,
-        'compliant_count': activeCredentials,
+        'compliant_count': compliantCredentials,
       },
       'notifications_summary': {
         'total_count': notificationRows.length,
@@ -376,12 +410,48 @@ class ApiClient implements AppApiClient {
     final rows = await _client
         .from('attendance_records')
         .select(
-          'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status',
+          'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status,schedule_status,schedule_notes',
         )
         .eq('employee_id', employee['id'])
         .order('record_date', ascending: false);
 
     return _toMapList(rows);
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() async {
+    final employee = await _currentEmployee();
+    if (employee == null || employee['id'] == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
+    final submissionRows = await _client
+        .from('employee_schedule_submissions')
+        .select(
+          'id,employee_id,term_label,semester_label,status,submitted_at,reviewed_at,review_notes,is_current',
+        )
+        .eq('employee_id', employee['id'])
+        .order('submitted_at', ascending: false)
+        .limit(1);
+
+    final submissionList = _toMapList(submissionRows);
+    if (submissionList.isEmpty) {
+      return null;
+    }
+
+    final submission = submissionList.first.cast<String, dynamic>();
+    final submissionId = submission['id'];
+
+    final dayRows = await _client
+        .from('employee_schedule_days')
+        .select('day_name,day_index,has_work,time_in,time_out')
+        .eq('schedule_submission_id', submissionId)
+        .order('day_index', ascending: true);
+
+    return {
+      'submission': submission,
+      'days': _toMapList(dayRows),
+    };
   }
 
   @override
@@ -493,6 +563,19 @@ class ApiClient implements AppApiClient {
           'id,employee_id,leave_type,remaining_days,created_at,updated_at',
         )
         .eq('employee_id', employeeId);
+    final sortedBalances = _toMapList(balances)
+      ..sort((left, right) {
+        final leftUpdated = DateTime.tryParse(
+              (left['updated_at'] ?? left['created_at'] ?? '').toString(),
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final rightUpdated = DateTime.tryParse(
+              (right['updated_at'] ?? right['created_at'] ?? '').toString(),
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+
+        return rightUpdated.compareTo(leftUpdated);
+      });
 
     final requests = await _client
         .from('leave_requests')
@@ -502,7 +585,10 @@ class ApiClient implements AppApiClient {
         .eq('employee_id', employeeId)
         .order('created_at', ascending: false);
 
-    return {'balances': _toMapList(balances), 'requests': _toMapList(requests)};
+    return {
+      'balances': sortedBalances,
+      'requests': _toMapList(requests),
+    };
   }
 
   Future<Map<String, dynamic>> getSupabaseHealth() async {
@@ -1009,13 +1095,14 @@ class ApiClient implements AppApiClient {
       final object = normalized.substring(firstSlash + 1);
 
       // If the first part looks like a bucket name (in our list), try it.
-      if (_credentialFilesBuckets.contains(possibleBucket)) {
+      final possibleBucketLower = possibleBucket.toLowerCase();
+      if (_credentialFilesBuckets.map((b) => b.toLowerCase()).contains(possibleBucketLower)) {
         try {
-          return _client.storage.from(possibleBucket).getPublicUrl(object);
+          return _client.storage.from(possibleBucketLower).getPublicUrl(object);
         } catch (_) {
           try {
             return await _client.storage
-                .from(possibleBucket)
+                .from(possibleBucketLower)
                 .createSignedUrl(object, 60 * 60 * 24 * 30);
           } catch (_) {
             // Fallback to trying other buckets below
@@ -1028,9 +1115,10 @@ class ApiClient implements AppApiClient {
     // This handles cases where the stored path is "employee-XX/timestamp_file.pdf"
     // and doesn't include a bucket prefix.
     for (final bucket in _credentialFilesBuckets) {
+      final bucketName = bucket.toLowerCase();
       try {
         // Try public URL first (faster)
-        return _client.storage.from(bucket).getPublicUrl(normalized);
+        return _client.storage.from(bucketName).getPublicUrl(normalized);
       } catch (_) {
         // Try next bucket
       }
@@ -1038,9 +1126,10 @@ class ApiClient implements AppApiClient {
 
     // Last resort: try signed URLs in case RLS blocks public access
     for (final bucket in _credentialFilesBuckets) {
+      final bucketName = bucket.toLowerCase();
       try {
         return await _client.storage
-            .from(bucket)
+            .from(bucketName)
             .createSignedUrl(normalized, 60 * 60 * 24 * 30);
       } catch (_) {
         // Try next bucket
@@ -1180,6 +1269,12 @@ class ApiClient implements AppApiClient {
     final authUid = (_client.auth.currentUser?.id ?? '').trim();
     final userId = (user?['id'] ?? '').toString().trim();
 
+    print('DEBUG uploadEmployeeCredentialFile:');
+    print('  currentUser: ${_client.auth.currentUser?.email}');
+    print('  authUid: "$authUid"');
+    print('  userId: "$userId"');
+    print('  employeeId: "$employeeId"');
+
     final candidatePrefixes = <String>{
       'employee-$employeeId',
       'employee_$employeeId',
@@ -1191,6 +1286,7 @@ class ApiClient implements AppApiClient {
       if (userId.isNotEmpty) 'user-$userId',
       if (userId.isNotEmpty) userId,
     }.toList();
+    print('  candidatePrefixes: $candidatePrefixes');
 
     final contentType = _contentTypeFromFileName(safeName);
 
@@ -1198,11 +1294,12 @@ class ApiClient implements AppApiClient {
     StorageException? lastPolicyDeniedError;
 
     for (final bucket in _credentialFilesBuckets) {
+      final bucketName = bucket.toLowerCase();
       for (final prefix in candidatePrefixes) {
         final filePath = '$prefix/${timestamp}_$safeName';
         try {
           await _client.storage
-              .from(bucket)
+              .from(bucketName)
               .uploadBinary(
                 filePath,
                 fileBytes,
@@ -1211,7 +1308,7 @@ class ApiClient implements AppApiClient {
                   upsert: false,
                 ),
               );
-          return '$bucket/$filePath';
+          return '$bucketName/$filePath';
         } on StorageException catch (error) {
           final message = error.message.toLowerCase();
           final isMissingBucket =

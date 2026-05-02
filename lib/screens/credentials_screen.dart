@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'file_viewer_screen.dart';
 // import 'package:flutter/services.dart'; // removed - unnecessary import
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,13 +50,13 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
       if (!mounted) {
         return;
       }
-      // Sort newest first (use updated_at then created_at)
+      // Sort newest uploaded first (prefer created_at, fallback to updated_at)
       data.sort((a, b) {
         DateTime parseDate(Map<String, dynamic> item) {
-          final updated = (item['updated_at'] ?? '').toString();
           final created = (item['created_at'] ?? '').toString();
-          return DateTime.tryParse(updated) ??
-              DateTime.tryParse(created) ??
+          final updated = (item['updated_at'] ?? '').toString();
+          return DateTime.tryParse(created) ??
+              DateTime.tryParse(updated) ??
               DateTime.fromMillisecondsSinceEpoch(0);
         }
 
@@ -403,6 +404,14 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     return note.isEmpty ? '-' : note;
   }
 
+  String _fileExtensionFromUrl(String url) {
+    final uri = Uri.tryParse(url);
+    final path = (uri?.path ?? url).toLowerCase();
+    final dot = path.lastIndexOf('.');
+    if (dot < 0 || dot == path.length - 1) return '';
+    return path.substring(dot + 1);
+  }
+
   void _openUploadScreen() {
     Navigator.push(
       context,
@@ -451,12 +460,16 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
         );
         return;
       }
+      final ext = _fileExtensionFromUrl(url);
+      final isImage =
+          ext == 'png' ||
+          ext == 'jpg' ||
+          ext == 'jpeg' ||
+          ext == 'gif' ||
+          ext == 'webp';
+      final isPdf = ext == 'pdf';
 
-      final lower = url.toLowerCase();
-      if (lower.endsWith('.png') ||
-          lower.endsWith('.jpg') ||
-          lower.endsWith('.jpeg') ||
-          lower.contains('image/')) {
+      if (isImage) {
         if (!context.mounted) return;
         showDialog(
           context: context,
@@ -478,12 +491,25 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                   padding: const EdgeInsets.all(8.0),
                   child: ElevatedButton.icon(
                     onPressed: () async {
-                      if (await canLaunchUrl(Uri.parse(url))) {
-                        await launchUrl(
-                          Uri.parse(url),
-                          mode: LaunchMode.externalApplication,
-                        );
+                      try {
+                        await launchUrl(Uri.parse(url),
+                            mode: LaunchMode.externalApplication);
                         if (context.mounted) Navigator.pop(context);
+                      } catch (_) {
+                        if (!context.mounted) return;
+                        showDialog(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            title: const Text('Open File'),
+                            content: SelectableText('Unable to open file directly. URL:\n$url'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Close'),
+                              ),
+                            ],
+                          ),
+                        );
                       }
                     },
                     icon: const Icon(Icons.open_in_new),
@@ -497,14 +523,46 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
         return;
       }
 
-      // For PDFs and documents, open directly
-      if (await canLaunchUrl(Uri.parse(url))) {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      } else {
+      if (isPdf) {
+        final title = (item['title'] ?? 'Credential').toString();
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to open file. No suitable app found.'),
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileViewerScreen(url: url, title: title),
+          ),
+        );
+        return;
+      }
+
+      // Prefer in-app viewer for HTTP(S) URLs
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        final title = (item['title'] ?? 'Credential').toString();
+        if (!context.mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileViewerScreen(url: url, title: title),
+          ),
+        );
+        return;
+      }
+
+      try {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Open File'),
+            content: SelectableText('Unable to open file directly. URL:\n$url'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
           ),
         );
       }
@@ -676,10 +734,10 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                     ),
                     const SizedBox(height: 16),
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: const Color(0xFFE3E8F2)),
                       ),
                       child: SingleChildScrollView(
@@ -689,32 +747,38 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                             final selected = index == selectedTab;
                             return Padding(
                               padding: EdgeInsets.only(
-                                right: index == tabs.length - 1 ? 0 : 8,
+                                right: index == tabs.length - 1 ? 0 : 6,
                               ),
                               child: InkWell(
-                                borderRadius: BorderRadius.circular(22),
-                                onTap: () =>
-                                    setState(() => selectedTab = index),
+                                borderRadius: BorderRadius.circular(999),
+                                onTap: () => setState(() => selectedTab = index),
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 180),
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 11,
+                                    horizontal: 14,
+                                    vertical: 9,
                                   ),
                                   decoration: BoxDecoration(
                                     color: selected
-                                        ? const Color(0xFF0A2E86)
+                                        ? const Color(0xFFEAF0FF)
                                         : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(22),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFFB8C9F4)
+                                          : const Color(0xFFE3E8F2),
+                                    ),
                                   ),
                                   child: Text(
                                     '${tabs[index]} (${_tabCountAt(index)})',
                                     style: TextStyle(
                                       color: selected
-                                          ? Colors.white
-                                          : const Color(0xFF58657A),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
+                                          ? const Color(0xFF1E4FB4)
+                                          : const Color(0xFF66748A),
+                                      fontSize: 13,
+                                      fontWeight: selected
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
                                     ),
                                   ),
                                 ),
@@ -765,191 +829,137 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                          padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(18),
                             border: Border.all(color: const Color(0xFFE6ECF6)),
                             boxShadow: const [
                               BoxShadow(
-                                color: Color(0x0B0B1E43),
-                                blurRadius: 14,
-                                offset: Offset(0, 6),
+                                color: Color(0x080B1E43),
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
                               ),
                             ],
                           ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: typeStyle.background,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  typeStyle.icon,
-                                  color: typeStyle.foreground,
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Color(0xFF141B2E),
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Flexible(
-                                          child: Wrap(
-                                            alignment: WrapAlignment.end,
-                                            spacing: 6,
-                                            runSpacing: 6,
-                                            children: [
-                                              _BadgePill(
-                                                label: badgeStyle.label,
-                                                background:
-                                                    badgeStyle.background,
-                                                foreground:
-                                                    badgeStyle.foreground,
-                                              ),
-                                              if (expiryBadgeStyle != null)
-                                                _BadgePill(
-                                                  label: expiryBadgeStyle.label,
-                                                  background: expiryBadgeStyle
-                                                      .background,
-                                                  foreground: expiryBadgeStyle
-                                                      .foreground,
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _displayTypeLabel(rawType),
-                                      style: const TextStyle(
-                                        color: Color(0xFF2A324A),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.calendar_today_outlined,
-                                          size: 14,
-                                          color: Color(0xFF7B879C),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            _credentialDate(item),
-                                            style: const TextStyle(
-                                              color: Color(0xFF4C5A73),
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        const Icon(
-                                          Icons.chevron_right_rounded,
-                                          size: 18,
-                                          color: Color(0xFF8A95A8),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    _MetaLine(
-                                      label: 'Expiration',
-                                      value: expirationDate,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    _MetaLine(
-                                      label: 'Last update',
-                                      value: lastUpdate,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    _MetaLine(
-                                      label: 'HR Note',
-                                      value: hrNote,
-                                      maxLines: 2,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Column(
-                                mainAxisSize: MainAxisSize.min,
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SizedBox(
-                                    height: 36,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _viewFile(item),
-                                      icon: const Icon(
-                                        Icons.remove_red_eye_outlined,
-                                        size: 16,
-                                      ),
-                                      label: const Text(
-                                        'View file',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(
-                                          color: Color(0xFFE6ECF6),
-                                        ),
-                                        foregroundColor: const Color(
-                                          0xFF2B2F36,
-                                        ),
-                                      ),
+                                  Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color: typeStyle.background,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      typeStyle.icon,
+                                      color: typeStyle.foreground,
+                                      size: 18,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  SizedBox(
-                                    height: 36,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _confirmDeleteCredential(item),
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        size: 16,
-                                        color: Color(0xFFB3261E),
-                                      ),
-                                      label: const Text(
-                                        'Delete',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Color(0xFFB3261E),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Color(0xFF111827),
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w800,
+                                          ),
                                         ),
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(
-                                          color: Color(0xFFF6D0D6),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          _displayTypeLabel(rawType),
+                                          style: const TextStyle(
+                                            color: Color(0xFF5B677A),
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
-                                        foregroundColor: const Color(
-                                          0xFFB3261E,
-                                        ),
-                                      ),
+                                      ],
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      _BadgePill(
+                                        label: badgeStyle.label,
+                                        background: badgeStyle.background,
+                                        foreground: badgeStyle.foreground,
+                                      ),
+                                      if (expiryBadgeStyle != null)
+                                        _BadgePill(
+                                          label: expiryBadgeStyle.label,
+                                          background: expiryBadgeStyle.background,
+                                          foreground: expiryBadgeStyle.foreground,
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.calendar_today_outlined,
+                                    size: 13,
+                                    color: Color(0xFF7B879C),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _credentialDate(item),
+                                    style: const TextStyle(
+                                      color: Color(0xFF4C5A73),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              _MetaLine(
+                                label: 'Expiration',
+                                value: expirationDate,
+                              ),
+                              const SizedBox(height: 4),
+                              _MetaLine(
+                                label: 'Last update',
+                                value: lastUpdate,
+                              ),
+                              const SizedBox(height: 4),
+                              _MetaLine(
+                                label: 'HR Note',
+                                value: hrNote,
+                                maxLines: 2,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  _CardActionButton(
+                                    onPressed: () => _viewFile(item),
+                                    icon: Icons.visibility_outlined,
+                                    label: 'View',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _CardActionButton(
+                                    onPressed: () =>
+                                        _confirmDeleteCredential(item),
+                                    icon: Icons.delete_outline,
+                                    label: 'Delete',
+                                    foreground: const Color(0xFFB3261E),
+                                    borderColor: const Color(0xFFF1CBD1),
                                   ),
                                 ],
                               ),
@@ -1015,7 +1025,7 @@ class _BadgePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(10),
@@ -1024,8 +1034,49 @@ class _BadgePill extends StatelessWidget {
         label,
         style: TextStyle(
           color: foreground,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _CardActionButton extends StatelessWidget {
+  const _CardActionButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    this.foreground = const Color(0xFF334155),
+    this.borderColor = const Color(0xFFDCE3EE),
+  });
+
+  final VoidCallback onPressed;
+  final IconData icon;
+  final String label;
+  final Color foreground;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 32,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 14),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 32),
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          side: BorderSide(color: borderColor),
+          foregroundColor: foreground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       ),
     );

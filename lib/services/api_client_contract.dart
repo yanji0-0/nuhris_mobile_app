@@ -28,6 +28,7 @@ abstract class AppApiClient {
 
   // Attendance / schedule
   Future<List<Map<String, dynamic>>> getAttendanceDtr();
+  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission();
   Future<Map<String, dynamic>> submitEmployeeSchedule({
     required String termLabel,
     required List<Map<String, dynamic>> days,

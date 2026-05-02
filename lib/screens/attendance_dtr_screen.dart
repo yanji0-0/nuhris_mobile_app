@@ -103,7 +103,7 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                 (sum, r) => sum + _toInt(r['overtime_minutes']),
               );
               final absences = records
-                  .where((r) => (r['status'] ?? '').toString() == 'absent')
+                  .where((r) => _displayStatus(r) == 'Absent')
                   .length;
 
               return LayoutBuilder(
@@ -285,7 +285,7 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                                         flex: 2,
                                                       ),
                                                       _BodyCell(
-                                                        '${_formatTime(record['scheduled_time_in'])} - ${_formatTime(record['scheduled_time_out'])}',
+                                                        _formatSchedule(record),
                                                         flex: 2,
                                                       ),
                                                       _BodyCell(
@@ -301,8 +301,7 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                                         flex: 1,
                                                       ),
                                                       _BodyCell(
-                                                        (record['status'] ?? '')
-                                                            .toString(),
+                                                        _displayStatus(record),
                                                         flex: 2,
                                                         isStatus: true,
                                                       ),
@@ -388,6 +387,70 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
     }
 
     return text;
+  }
+
+  String _formatSchedule(Map<String, dynamic> record) {
+    final inText = _formatTime(record['scheduled_time_in']);
+    final outText = _formatTime(record['scheduled_time_out']);
+    if (inText == '--' || outText == '--') {
+      return 'No schedule';
+    }
+    return '$inText - $outText';
+  }
+
+  String _displayStatus(Map<String, dynamic> record) {
+    final raw = (record['status'] ?? '').toString().trim().toLowerCase();
+    final scheduleStatus = (record['schedule_status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final noSchedule = _isNoScheduleRecord(record);
+
+    if (scheduleStatus == 'rejected' || scheduleStatus == 'declined') {
+      return 'Declined';
+    }
+
+    if (noSchedule) {
+      return 'No schedule';
+    }
+
+    if (raw == 'present') return 'Present';
+    if (raw == 'absent') return 'Absent';
+    if (raw == 'weekend') return 'Weekend';
+    if (raw == 'on_leave' || raw == 'on leave') return 'Non-working day';
+    if (raw == 'non-working day' ||
+        raw == 'non_working_day' ||
+        raw == 'non-working' ||
+        raw == 'non working day') {
+      return 'Non-working day';
+    }
+
+    if (raw.isEmpty) return '-';
+    return raw
+        .split(RegExp(r'[ _-]+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
+
+  bool _isNoScheduleRecord(Map<String, dynamic> record) {
+    final scheduleStatus = (record['schedule_status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    if (scheduleStatus == 'no_schedule' ||
+        scheduleStatus == 'no schedule' ||
+        scheduleStatus == 'none' ||
+        scheduleStatus == 'pending' ||
+        scheduleStatus == 'draft' ||
+        scheduleStatus == 'invalid') {
+      return true;
+    }
+
+    final inText = _formatTime(record['scheduled_time_in']);
+    final outText = _formatTime(record['scheduled_time_out']);
+    return inText == '--' && outText == '--';
   }
 }
 
@@ -499,17 +562,75 @@ class _BodyCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Color statusBg(String value) {
+      switch (value) {
+        case 'Present':
+          return const Color(0xFFDDF5E3);
+        case 'Absent':
+          return const Color(0xFFFCE0E0);
+        case 'Non-working day':
+          return const Color(0xFFFFF1D9);
+        case 'Weekend':
+          return const Color(0xFFE7ECF4);
+        case 'Declined':
+          return const Color(0xFFFADADD);
+        case 'No schedule available':
+          return const Color(0xFFECEFF5);
+        default:
+          return const Color(0xFFECEFF5);
+      }
+    }
+
+    Color statusFg(String value) {
+      switch (value) {
+        case 'Present':
+          return const Color(0xFF1F8A46);
+        case 'Absent':
+          return const Color(0xFFC52929);
+        case 'Non-working day':
+          return const Color(0xFFB7791F);
+        case 'Weekend':
+          return const Color(0xFF64748B);
+        case 'Declined':
+          return const Color(0xFFB3261E);
+        case 'No schedule available':
+          return const Color(0xFF475569);
+        default:
+          return const Color(0xFF475569);
+      }
+    }
+
     return Expanded(
       flex: flex,
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 12,
-          color: isStatus ? const Color(0xFF1E9A63) : const Color(0xFF303A4D),
-          fontWeight: isStatus ? FontWeight.w700 : FontWeight.w500,
-        ),
-      ),
+      child: isStatus
+          ? Align(
+              alignment: Alignment.center,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusBg(text),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: statusFg(text),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            )
+          : Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF303A4D),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
     );
   }
 }
@@ -555,18 +676,30 @@ class _WeeklyScheduleComposer extends ConsumerStatefulWidget {
       _WeeklyScheduleComposerState();
 }
 
-class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer> {
+class _WeeklyScheduleComposerState
+    extends ConsumerState<_WeeklyScheduleComposer> {
   static const List<String> _terms = ['1st Term', '2nd Term', '3rd Term'];
+  static const String _lockedMessage =
+      'You already have an active schedule submission. The button is disabled until HR reviews it or resets it.';
+  static const String _approvedLockedMessage =
+      'This schedule is approved and locked. Please contact HR to request schedule changes.';
 
   late String _selectedTerm;
   late final List<_ScheduleDayState> _days;
   bool _isSubmitting = false;
+  bool _isLoadingSubmission = true;
+  String _submissionStatus = 'draft';
 
   @override
   void initState() {
     super.initState();
     _selectedTerm = _terms.last;
-    _days = [
+    _days = _buildDefaultDays();
+    _loadCurrentSubmission();
+  }
+
+  List<_ScheduleDayState> _buildDefaultDays() {
+    return [
       _ScheduleDayState(
         key: 'monday',
         dayIndex: 1,
@@ -604,6 +737,144 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
         mode: _ScheduleMode.noWork,
       ),
     ];
+  }
+
+  bool get _isLocked =>
+      _submissionStatus == 'pending' || _submissionStatus == 'approved';
+
+  String get _submissionLabel {
+    switch (_submissionStatus) {
+      case 'approved':
+        return 'Approved';
+      case 'pending':
+        return 'Pending';
+      case 'declined':
+        return 'Declined';
+      case 'reset':
+        return 'Reset';
+      default:
+        return 'Draft';
+    }
+  }
+
+  String get _noticeTitle {
+    if (_submissionStatus == 'approved') {
+      return _approvedLockedMessage;
+    }
+    if (_submissionStatus == 'pending') {
+      return _lockedMessage;
+    }
+    if (_submissionStatus == 'declined') {
+      return 'This schedule was declined by HR. You may submit a new schedule.';
+    }
+    return 'Mark each day as With Work or No Work. HR approval is required before this schedule becomes the DTR reference.';
+  }
+
+  String get _noticeSubtitle {
+    if (_submissionStatus == 'approved') {
+      return 'Please contact HR to request schedule changes.';
+    }
+    if (_submissionStatus == 'pending') {
+      return 'The button is disabled until HR reviews it or resets it.';
+    }
+    if (_submissionStatus == 'declined') {
+      return 'You can update the schedule and resubmit it.';
+    }
+    return 'Mark each day as With Work or No Work. HR approval is required before this schedule becomes the DTR reference.';
+  }
+
+  Future<void> _loadCurrentSubmission() async {
+    try {
+      final api = ref.read(apiClientProvider);
+      final response = await api.getCurrentEmployeeScheduleSubmission();
+      if (!mounted) return;
+
+      if (response == null) {
+        setState(() {
+          _isLoadingSubmission = false;
+          _submissionStatus = 'draft';
+          _selectedTerm = _terms.last;
+          _resetDaysToDefault();
+        });
+        return;
+      }
+
+      final submission =
+          (response['submission'] as Map?)?.cast<String, dynamic>() ?? {};
+      final days = ((response['days'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((day) => day.cast<String, dynamic>())
+          .toList();
+      final status = (submission['status'] ?? 'draft')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final termLabel =
+          (submission['term_label'] ??
+                  submission['semester_label'] ??
+                  _terms.last)
+              .toString()
+              .trim();
+
+      setState(() {
+        _isLoadingSubmission = false;
+        _submissionStatus = status.isEmpty ? 'draft' : status;
+        _selectedTerm = termLabel.isEmpty ? _terms.last : termLabel;
+        _applySavedDays(days);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSubmission = false;
+      });
+    }
+  }
+
+  void _resetDaysToDefault() {
+    for (final day in _days) {
+      day.mode = day.label == 'Monday' || day.label == 'Wednesday'
+          ? _ScheduleMode.withWork
+          : _ScheduleMode.noWork;
+      day.timeIn = null;
+      day.timeOut = null;
+    }
+  }
+
+  TimeOfDay? _parseTimeOfDay(Object? value) {
+    final text = (value ?? '').toString().trim();
+    if (text.isEmpty) return null;
+
+    final parts = text.split(':');
+    if (parts.length < 2) return null;
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return null;
+
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  void _applySavedDays(List<Map<String, dynamic>> days) {
+    final dayMap = <String, Map<String, dynamic>>{};
+    for (final day in days) {
+      final label = (day['day_name'] ?? '').toString().trim().toLowerCase();
+      if (label.isNotEmpty) {
+        dayMap[label] = day;
+      }
+    }
+
+    for (final day in _days) {
+      final saved = dayMap[day.label.toLowerCase()];
+      if (saved == null) {
+        continue;
+      }
+
+      day.mode = saved['has_work'] == true
+          ? _ScheduleMode.withWork
+          : _ScheduleMode.noWork;
+      day.timeIn = _parseTimeOfDay(saved['time_in']);
+      day.timeOut = _parseTimeOfDay(saved['time_out']);
+    }
   }
 
   @override
@@ -644,6 +915,59 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
                 color: AppColors.mutedText,
               ),
             ),
+            if (_isLoadingSubmission) ...[
+              const SizedBox(height: 12),
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+            ] else if (_isLocked || _submissionStatus == 'declined') ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: _submissionStatus == 'declined'
+                      ? const Color(0xFFFADADD)
+                      : const Color(0xFFFFF4CC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _submissionStatus == 'declined'
+                        ? const Color(0xFFF0A3A3)
+                        : const Color(0xFFF2D46B),
+                  ),
+                ),
+                child: Text(
+                  _noticeTitle,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.35,
+                    color: _submissionStatus == 'declined'
+                        ? const Color(0xFF991B1B)
+                        : const Color(0xFF7A5B00),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _noticeSubtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.3,
+                    color: _submissionStatus == 'declined'
+                        ? const Color(0xFF7F1D1D)
+                        : const Color(0xFF8A6A08),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -678,9 +1002,9 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          'Status: Draft',
-                          style: TextStyle(
+                        Text(
+                          'Status: $_submissionLabel',
+                          style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF64748B),
                           ),
@@ -701,37 +1025,46 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
               ),
             ),
             const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: _selectedTerm,
-              isExpanded: true,
-              decoration: InputDecoration(
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.primaryBlue),
+            IgnorePointer(
+              ignoring: _isLocked,
+              child: Opacity(
+                opacity: _isLocked ? 0.72 : 1,
+                child: DropdownButtonFormField<String>(
+                  value: _selectedTerm,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(
+                        color: AppColors.primaryBlue,
+                      ),
+                    ),
+                  ),
+                  items: _terms
+                      .map(
+                        (term) =>
+                            DropdownMenuItem(value: term, child: Text(term)),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() => _selectedTerm = value);
+                  },
                 ),
               ),
-              items: _terms
-                  .map(
-                    (term) => DropdownMenuItem(value: term, child: Text(term)),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() => _selectedTerm = value);
-              },
             ),
             const SizedBox(height: 12),
             ..._days.map(
@@ -739,6 +1072,7 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _ScheduleDayCard(
                   day: day,
+                  enabled: !_isLocked,
                   onModeChanged: (mode) {
                     setState(() => day.mode = mode);
                   },
@@ -769,7 +1103,7 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: _isSubmitting ? null : _reset,
+                  onPressed: (_isSubmitting || _isLocked) ? null : _reset,
                   style: TextButton.styleFrom(
                     foregroundColor: const Color(0xFF475569),
                     padding: const EdgeInsets.symmetric(
@@ -781,7 +1115,7 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
                 ),
                 const SizedBox(width: 10),
                 FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
+                  onPressed: (_isSubmitting || _isLocked) ? null : _submit,
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF00386f),
                     foregroundColor: Colors.white,
@@ -791,7 +1125,11 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
                     ),
                   ),
                   child: Text(
-                    _isSubmitting ? 'Submitting...' : 'Submit Schedule to HR',
+                    _isLocked
+                        ? 'Locked'
+                        : _isSubmitting
+                        ? 'Submitting...'
+                        : 'Submit Schedule to HR',
                   ),
                 ),
               ],
@@ -803,7 +1141,7 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
   }
 
   void _reset() {
-    if (_isSubmitting) {
+    if (_isSubmitting || _isLocked) {
       return;
     }
 
@@ -863,6 +1201,9 @@ class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer
           if (!mounted) {
             return;
           }
+          setState(() {
+            _submissionStatus = 'pending';
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -922,11 +1263,13 @@ class _ScheduleDayState {
 class _ScheduleDayCard extends StatelessWidget {
   const _ScheduleDayCard({
     required this.day,
+    required this.enabled,
     required this.onModeChanged,
     required this.onTimePicked,
   });
 
   final _ScheduleDayState day;
+  final bool enabled;
   final ValueChanged<_ScheduleMode> onModeChanged;
   final Future<void> Function(_ScheduleTimeField which) onTimePicked;
 
@@ -965,6 +1308,7 @@ class _ScheduleDayCard extends StatelessWidget {
                     selectedColor: const Color(0xFF16A34A),
                     textColor: const Color(0xFF16A34A),
                     selectedTextColor: Colors.white,
+                    enabled: enabled,
                     onTap: () => onModeChanged(_ScheduleMode.withWork),
                   ),
                   const SizedBox(width: 6),
@@ -974,6 +1318,7 @@ class _ScheduleDayCard extends StatelessWidget {
                     selectedColor: const Color(0xFFDC2626),
                     textColor: const Color(0xFFDC2626),
                     selectedTextColor: Colors.white,
+                    enabled: enabled,
                     onTap: () => onModeChanged(_ScheduleMode.noWork),
                   ),
                 ],
@@ -988,6 +1333,7 @@ class _ScheduleDayCard extends StatelessWidget {
                   child: _TimePickerField(
                     label: 'Time In',
                     value: day.timeIn,
+                    enabled: enabled,
                     onTap: () => onTimePicked(_ScheduleTimeField.timeIn),
                   ),
                 ),
@@ -996,6 +1342,7 @@ class _ScheduleDayCard extends StatelessWidget {
                   child: _TimePickerField(
                     label: 'Time Out',
                     value: day.timeOut,
+                    enabled: enabled,
                     onTap: () => onTimePicked(_ScheduleTimeField.timeOut),
                   ),
                 ),
@@ -1028,6 +1375,7 @@ class _ModePillButton extends StatelessWidget {
     required this.selectedColor,
     required this.textColor,
     required this.selectedTextColor,
+    required this.enabled,
     required this.onTap,
   });
 
@@ -1036,20 +1384,29 @@ class _ModePillButton extends StatelessWidget {
   final Color selectedColor;
   final Color textColor;
   final Color selectedTextColor;
+  final bool enabled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(999),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? selectedColor : Colors.white,
+          color: selected
+              ? selectedColor
+              : enabled
+              ? Colors.white
+              : const Color(0xFFF3F4F6),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: selected ? selectedColor : const Color(0xFFD1D5DB),
+            color: selected
+                ? selectedColor
+                : enabled
+                ? const Color(0xFFD1D5DB)
+                : const Color(0xFFE5E7EB),
           ),
         ),
         child: Text(
@@ -1057,7 +1414,11 @@ class _ModePillButton extends StatelessWidget {
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w700,
-            color: selected ? selectedTextColor : textColor,
+            color: selected
+                ? selectedTextColor
+                : enabled
+                ? textColor
+                : const Color(0xFF9CA3AF),
           ),
         ),
       ),
@@ -1069,11 +1430,13 @@ class _TimePickerField extends StatelessWidget {
   const _TimePickerField({
     required this.label,
     required this.value,
+    required this.enabled,
     required this.onTap,
   });
 
   final String label;
   final TimeOfDay? value;
+  final bool enabled;
   final VoidCallback onTap;
 
   @override
@@ -1095,16 +1458,20 @@ class _TimePickerField extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         InkWell(
-          onTap: onTap,
+          onTap: enabled ? onTap : null,
           borderRadius: BorderRadius.circular(10),
           child: Container(
             height: 42,
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: enabled ? Colors.white : const Color(0xFFF3F4F6),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFCBD5E1)),
+              border: Border.all(
+                color: enabled
+                    ? const Color(0xFFCBD5E1)
+                    : const Color(0xFFE5E7EB),
+              ),
             ),
             child: Row(
               children: [
@@ -1115,7 +1482,9 @@ class _TimePickerField extends StatelessWidget {
                       fontSize: 13,
                       color: value == null
                           ? const Color(0xFF94A3B8)
-                          : const Color(0xFF0F172A),
+                          : enabled
+                          ? const Color(0xFF0F172A)
+                          : const Color(0xFF9CA3AF),
                       fontWeight: FontWeight.w600,
                     ),
                   ),

@@ -50,6 +50,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   bool _obscureCurrentPassword = true;
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
+  ProviderSubscription<AsyncValue<Map<String, dynamic>>>? _accountSubscription;
+  ProviderSubscription<AsyncValue<String?>>? _profilePhotoSubscription;
 
   final List<_EmployeeTypeOption> employeeTypes = const [
     _EmployeeTypeOption(value: 'Faculty', label: 'Faculty'),
@@ -61,54 +63,65 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   void initState() {
     super.initState();
     // Listen to account and profile photo providers and populate fields when data arrives.
-    ref.listen<AsyncValue<Map<String, dynamic>>>(accountProvider, (prev, next) {
-      next.when(
-        data: (payload) {
-          final user = (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
-          final employee =
-              (payload['employee'] as Map?)?.cast<String, dynamic>() ?? {};
-          final department =
-              (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
+    _accountSubscription = ref.listenManual<AsyncValue<Map<String, dynamic>>>(
+      accountProvider,
+      (prev, next) {
+        next.when(
+          data: (payload) {
+            final user =
+                (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
+            final employee =
+                (payload['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+            final department =
+                (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
 
-          _displayName = (user['name'] ?? 'Employee').toString();
-          _displayEmail = (user['email'] ?? '').toString();
+            _displayName = (user['name'] ?? 'Employee').toString();
+            _displayEmail = (user['email'] ?? '').toString();
 
-          _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
-          _departmentCtrl.text = (department['name'] ?? '').toString();
-          _positionCtrl.text = (employee['position'] ?? '').toString();
-          _phoneCtrl.text = (employee['phone'] ?? '').toString();
-          _dateHiredCtrl.text = _formatDate(
-            (employee['hire_date'] ?? '').toString(),
-          );
-          _addressCtrl.text = (employee['address'] ?? '').toString();
-          employeeType = _normalizeEmployeeType(employee['employment_type']);
+            _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
+            _departmentCtrl.text = (department['name'] ?? '').toString();
+            _positionCtrl.text = (employee['position'] ?? '').toString();
+            _phoneCtrl.text = (employee['phone'] ?? '').toString();
+            _dateHiredCtrl.text = _formatDate(
+              (employee['hire_date'] ?? '').toString(),
+            );
+            _addressCtrl.text = (employee['address'] ?? '').toString();
+            employeeType = _normalizeEmployeeType(employee['employment_type']);
 
-          if (mounted) setState(() => _isLoading = false);
-        },
-        loading: () {
-          if (mounted) setState(() => _isLoading = true);
-        },
-        error: (_, __) {
-          if (mounted) setState(() => _isLoading = false);
-        },
-      );
-    });
+            if (mounted) setState(() => _isLoading = false);
+          },
+          loading: () {
+            if (mounted) setState(() => _isLoading = true);
+          },
+          error: (_, __) {
+            if (mounted) setState(() => _isLoading = false);
+          },
+        );
+      },
+      fireImmediately: true,
+    );
 
-    ref.listen<AsyncValue<String?>>(profilePhotoProvider, (prev, next) {
-      next.when(
-        data: (url) {
-          if (url != null && url.trim().isNotEmpty) {
-            if (mounted) setState(() => _profilePhotoUrl = url);
-          }
-        },
-        loading: () {},
-        error: (_, __) {},
-      );
-    });
+    _profilePhotoSubscription = ref.listenManual<AsyncValue<String?>>(
+      profilePhotoProvider,
+      (prev, next) {
+        next.when(
+          data: (url) {
+            if (url != null && url.trim().isNotEmpty) {
+              if (mounted) setState(() => _profilePhotoUrl = url);
+            }
+          },
+          loading: () {},
+          error: (_, __) {},
+        );
+      },
+      fireImmediately: true,
+    );
   }
 
   @override
   void dispose() {
+    _accountSubscription?.close();
+    _profilePhotoSubscription?.close();
     _employeeIdCtrl.dispose();
     _departmentCtrl.dispose();
     _positionCtrl.dispose();
@@ -121,6 +134,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     super.dispose();
   }
 
+  // ignore: unused_element
   Future<void> _pickDateHired() async {
     final now = DateTime.now();
     final picked = await showDatePicker(

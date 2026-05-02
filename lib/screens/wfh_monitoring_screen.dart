@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'file_viewer_screen.dart';
 import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
@@ -205,14 +206,46 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
         return;
       }
 
-      // For PDFs and documents, open directly
-      if (await canLaunchUrl(Uri.parse(url))) {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      } else {
+      // For PDFs, show in-app viewer; for other docs, try external open and fallback to showing URL.
+      if (lower.endsWith('.pdf')) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to open file. No suitable app found.'),
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileViewerScreen(url: url, title: 'Document'),
+          ),
+        );
+        return;
+      }
+
+      // If URL is HTTP(S), prefer in-app viewer (WebView) for better UX on mobile.
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        if (!context.mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FileViewerScreen(url: url, title: 'Document'),
+          ),
+        );
+        return;
+      }
+
+      // Last resort: try to open externally and show URL dialog on failure.
+      try {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Open File'),
+            content: SelectableText('Unable to open file directly. URL:\n$url'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
           ),
         );
       }

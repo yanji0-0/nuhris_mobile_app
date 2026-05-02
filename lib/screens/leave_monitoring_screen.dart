@@ -84,11 +84,15 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           final balances = ((payload['balances'] as List?) ?? const [])
               .whereType<Map>()
               .map((e) => e.cast<String, dynamic>())
-              .toList();
+              .toList()
+            ..sort(_compareNewestFirst);
           final requests = ((payload['requests'] as List?) ?? const [])
               .whereType<Map>()
               .map((e) => e.cast<String, dynamic>())
-              .toList();
+              .toList()
+            ..sort(_compareNewestFirst);
+          final usageSummary = _buildLeaveUsageSummary(requests);
+          final breakdown = _buildLeaveUsageBreakdown(requests);
 
           return Container(
             decoration: const BoxDecoration(
@@ -118,7 +122,11 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
+                  _LeaveUsageSummaryPanel(usageSummary: usageSummary),
+                  const SizedBox(height: 18),
                   _BalancePanel(balances: balances),
+                  const SizedBox(height: 18),
+                  _LeaveUsageBreakdownPanel(breakdown: breakdown),
                   const SizedBox(height: 18),
                   const Text(
                     'Leave History',
@@ -225,6 +233,158 @@ String _remainingDays(dynamic value) {
   }
 
   return value?.toString() ?? '0';
+}
+
+double _toDouble(dynamic value) {
+  if (value is num) {
+    return value.toDouble();
+  }
+  return double.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+String _normalizedLeaveType(String value) {
+  return value.trim().toLowerCase();
+}
+
+String _prettyLeaveType(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return 'Leave';
+  }
+
+  return normalized
+      .replaceAll(RegExp(r'[_-]+'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .map(
+        (part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+      )
+      .join(' ');
+}
+
+bool _isApprovedLeave(String status) {
+  return status.trim().toLowerCase() == 'approved';
+}
+
+bool _isDeductibleLeaveType(String type) {
+  final normalized = _normalizedLeaveType(type);
+  return normalized.contains('vacation') ||
+      normalized.contains('sick') ||
+      normalized.contains('emergency');
+}
+
+Map<String, double> _buildLeaveUsageSummary(
+  List<Map<String, dynamic>> requests,
+) {
+  final usage = <String, double>{
+    'Vacation Used': 0,
+    'Sick Used': 0,
+    'Emergency Used': 0,
+  };
+
+  for (final request in requests) {
+    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
+      continue;
+    }
+
+    final leaveType = _normalizedLeaveType(
+      (request['leave_type'] ?? '').toString(),
+    );
+    final daysUsed = _toDouble(request['days_deducted']);
+
+    if (leaveType.contains('vacation')) {
+      usage['Vacation Used'] = usage['Vacation Used']! + daysUsed;
+    } else if (leaveType.contains('sick')) {
+      usage['Sick Used'] = usage['Sick Used']! + daysUsed;
+    } else if (leaveType.contains('emergency')) {
+      usage['Emergency Used'] = usage['Emergency Used']! + daysUsed;
+    }
+  }
+
+  return usage;
+}
+
+Map<String, List<Map<String, dynamic>>> _buildLeaveUsageBreakdown(
+  List<Map<String, dynamic>> requests,
+) {
+  final deductible = <String, Map<String, dynamic>>{};
+  final trackedOnly = <String, Map<String, dynamic>>{};
+
+  void accumulate(
+    Map<String, Map<String, dynamic>> target,
+    String label,
+    double daysUsed,
+  ) {
+    final current = target[label];
+    if (current == null) {
+      target[label] = {'type': label, 'days_used': daysUsed, 'count': 1};
+      return;
+    }
+
+    current['days_used'] = _toDouble(current['days_used']) + daysUsed;
+    current['count'] = (current['count'] as int) + 1;
+  }
+
+  for (final request in requests) {
+    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
+      continue;
+    }
+
+    final leaveTypeRaw = (request['leave_type'] ?? '').toString();
+    final leaveType = _normalizedLeaveType(leaveTypeRaw);
+    final label = _prettyLeaveType(leaveTypeRaw);
+    final daysUsed = _toDouble(request['days_deducted']);
+
+    if (daysUsed <= 0) {
+      continue;
+    }
+
+    if (_isDeductibleLeaveType(leaveType)) {
+      accumulate(deductible, label, daysUsed);
+    } else {
+      accumulate(trackedOnly, label, daysUsed);
+    }
+  }
+
+  return {
+    'deductible': deductible.values.toList(),
+    'tracked_only': trackedOnly.values.toList(),
+  };
+}
+
+String _formatDaysUsed(dynamic value) {
+  final days = _toDouble(value);
+  if (days == days.roundToDouble()) {
+    return days.toInt().toString();
+  }
+  return days.toStringAsFixed(1);
+}
+
+DateTime _parseNewestDate(Map<String, dynamic> item) {
+  final candidates = [
+    item['updated_at']?.toString(),
+    item['created_at']?.toString(),
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate == null || candidate.isEmpty) {
+      continue;
+    }
+
+    final parsed = DateTime.tryParse(candidate);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+
+  return DateTime.fromMillisecondsSinceEpoch(0);
+}
+
+int _compareNewestFirst(
+  Map<String, dynamic> left,
+  Map<String, dynamic> right,
+) {
+  return _parseNewestDate(right).compareTo(_parseNewestDate(left));
 }
 
 class _BalancePanel extends StatelessWidget {
@@ -337,6 +497,278 @@ class _BalancePanel extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+class _LeaveUsageSummaryPanel extends StatelessWidget {
+  const _LeaveUsageSummaryPanel({required this.usageSummary});
+
+  final Map<String, double> usageSummary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Leave Usage Summary',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF111827),
+          ),
+        ),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 1,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          childAspectRatio: 3.2,
+          children: [
+            _UsageSummaryCard(
+              label: 'Vacation Used',
+              value: _formatDaysUsed(usageSummary['Vacation Used']),
+              foreground: const Color(0xFF1F8A46),
+              background: const Color(0xFFE7F8EC),
+              border: const Color(0xFFBFE6CD),
+            ),
+            _UsageSummaryCard(
+              label: 'Sick Used',
+              value: _formatDaysUsed(usageSummary['Sick Used']),
+              foreground: const Color(0xFFB7791F),
+              background: const Color(0xFFFFF4DD),
+              border: const Color(0xFFF1D79B),
+            ),
+            _UsageSummaryCard(
+              label: 'Emergency Used',
+              value: _formatDaysUsed(usageSummary['Emergency Used']),
+              foreground: const Color(0xFF7C3AED),
+              background: const Color(0xFFF1E9FF),
+              border: const Color(0xFFDCC8FF),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _UsageSummaryCard extends StatelessWidget {
+  const _UsageSummaryCard({
+    required this.label,
+    required this.value,
+    required this.foreground,
+    required this.background,
+    required this.border,
+  });
+
+  final String label;
+  final String value;
+  final Color foreground;
+  final Color background;
+  final Color border;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: foreground,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: foreground,
+              fontWeight: FontWeight.w800,
+              fontSize: 28,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LeaveUsageBreakdownPanel extends StatelessWidget {
+  const _LeaveUsageBreakdownPanel({required this.breakdown});
+
+  final Map<String, List<Map<String, dynamic>>> breakdown;
+
+  @override
+  Widget build(BuildContext context) {
+    final deductible = breakdown['deductible'] ?? const [];
+    final trackedOnly = breakdown['tracked_only'] ?? const [];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EAF3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Detailed Leave Usage',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (deductible.isEmpty && trackedOnly.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Text(
+                'No approved leave usage yet.',
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+              ),
+            ),
+          if (deductible.isNotEmpty) ...[
+            const Text(
+              'Leaves That Affect Balance',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF15803D),
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...deductible.map(
+              (usage) => _UsageBreakdownCard(
+                type: (usage['type'] ?? 'Leave').toString(),
+                daysUsed: _formatDaysUsed(usage['days_used']),
+                count: (usage['count'] ?? 0) as int,
+                background: const Color(0xFFF0FAF3),
+                border: const Color(0xFFCFECD6),
+                titleColor: const Color(0xFF14532D),
+                valueColor: const Color(0xFF15803D),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (trackedOnly.isNotEmpty) ...[
+            const Text(
+              'Tracked Leaves (Balance Not Affected)',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF475569),
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...trackedOnly.map(
+              (usage) => _UsageBreakdownCard(
+                type: (usage['type'] ?? 'Leave').toString(),
+                daysUsed: _formatDaysUsed(usage['days_used']),
+                count: (usage['count'] ?? 0) as int,
+                background: const Color(0xFFF8FAFC),
+                border: const Color(0xFFE2E8F0),
+                titleColor: const Color(0xFF0F172A),
+                valueColor: const Color(0xFF334155),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Note: These leaves are tracked for record-keeping but do not reduce your leave balance.',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _UsageBreakdownCard extends StatelessWidget {
+  const _UsageBreakdownCard({
+    required this.type,
+    required this.daysUsed,
+    required this.count,
+    required this.background,
+    required this.border,
+    required this.titleColor,
+    required this.valueColor,
+  });
+
+  final String type;
+  final String daysUsed;
+  final int count;
+  final Color background;
+  final Color border;
+  final Color titleColor;
+  final Color valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  type,
+                  style: TextStyle(
+                    color: titleColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$count request(s)',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            daysUsed,
+            style: TextStyle(
+              color: valueColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 22,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

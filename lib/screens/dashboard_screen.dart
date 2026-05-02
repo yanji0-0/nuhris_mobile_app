@@ -80,6 +80,9 @@ class DashboardScreen extends ConsumerWidget {
         .whereType<Map>()
         .map((e) => e.cast<String, dynamic>())
         .toList();
+    final unreadNotifications = notifications
+      .where((notification) => notification['is_read'] != true)
+      .toList();
 
     final employee =
         (dashboard['employee'] as Map?)?.cast<String, dynamic>() ?? {};
@@ -96,6 +99,8 @@ class DashboardScreen extends ConsumerWidget {
         (credentialsSummary['active_count'] ?? 0) as num;
     final expiringSoonCount =
         (credentialsSummary['expiring_soon_count'] ?? 0) as num;
+    final pendingReviewCount =
+      (credentialsSummary['pending_review_count'] ?? 0) as num;
     final nonCompliantCount =
         (credentialsSummary['non_compliant_count'] ?? 0) as num;
     final compliantCount =
@@ -106,7 +111,8 @@ class DashboardScreen extends ConsumerWidget {
     final totalLeaveDays = ((leaveSummary['total_days_remaining'] ?? 0) as num)
         .toDouble();
     final totalNotifications =
-        (notificationsSummary['total_count'] ?? notifications.length) as num;
+      (notificationsSummary['unread_count'] ?? unreadNotifications.length)
+        as num;
 
     final firstName = (employee['first_name'] ?? '').toString().trim();
     final lastName = (employee['last_name'] ?? '').toString().trim();
@@ -122,12 +128,12 @@ class DashboardScreen extends ConsumerWidget {
       _MetricData(
         title: 'Active Credentials',
         value: activeCredentialsCount.toInt().toString(),
-        subtitle: '${expiringSoonCount.toInt()} pending review',
+        subtitle: '${pendingReviewCount.toInt()} pending review',
       ),
       _MetricData(
         title: 'Compliance',
         value: complianceValue,
-        subtitle: 'Up to date',
+        subtitle: 'Approved and current',
       ),
       _MetricData(
         title: 'Leave Balance',
@@ -245,13 +251,13 @@ class DashboardScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  if (notifications.isEmpty)
+                  if (unreadNotifications.isEmpty)
                     const Text(
                       'No recent alerts available.',
                       style: TextStyle(color: AppColors.mutedText),
                     )
                   else
-                    ...notifications.take(3).map((n) {
+                    ...unreadNotifications.take(3).map((n) {
                       final announcement =
                           (n['announcement'] as Map?)
                               ?.cast<String, dynamic>() ??
