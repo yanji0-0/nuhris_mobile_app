@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../navigation/app_nav.dart';
 import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
-class AttendanceDtrScreen extends StatefulWidget {
+class AttendanceDtrScreen extends ConsumerStatefulWidget {
   const AttendanceDtrScreen({
     super.key,
     required this.onNavigate,
@@ -15,16 +18,17 @@ class AttendanceDtrScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<AttendanceDtrScreen> createState() => _AttendanceDtrScreenState();
+  ConsumerState<AttendanceDtrScreen> createState() =>
+      _AttendanceDtrScreenState();
 }
 
-class _AttendanceDtrScreenState extends State<AttendanceDtrScreen> {
+class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
   late Future<List<Map<String, dynamic>>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = ApiClient.instance.getAttendanceDtr();
+    _future = ref.read(apiClientProvider).getAttendanceDtr();
   }
 
   @override
@@ -543,15 +547,15 @@ class _AttendanceInfoBanner extends StatelessWidget {
   }
 }
 
-class _WeeklyScheduleComposer extends StatefulWidget {
+class _WeeklyScheduleComposer extends ConsumerStatefulWidget {
   const _WeeklyScheduleComposer();
 
   @override
-  State<_WeeklyScheduleComposer> createState() =>
+  ConsumerState<_WeeklyScheduleComposer> createState() =>
       _WeeklyScheduleComposerState();
 }
 
-class _WeeklyScheduleComposerState extends State<_WeeklyScheduleComposer> {
+class _WeeklyScheduleComposerState extends ConsumerState<_WeeklyScheduleComposer> {
   static const List<String> _terms = ['1st Term', '2nd Term', '3rd Term'];
 
   late String _selectedTerm;
@@ -852,7 +856,8 @@ class _WeeklyScheduleComposerState extends State<_WeeklyScheduleComposer> {
         )
         .toList();
 
-    ApiClient.instance
+    final api = ref.read(apiClientProvider);
+    api
         .submitEmployeeSchedule(termLabel: _selectedTerm, days: payload)
         .then((result) {
           if (!mounted) {

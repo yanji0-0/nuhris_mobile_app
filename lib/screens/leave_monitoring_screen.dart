@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
-class LeaveMonitoringScreen extends StatefulWidget {
+class LeaveMonitoringScreen extends ConsumerStatefulWidget {
   const LeaveMonitoringScreen({
     super.key,
     required this.onNavigate,
@@ -16,16 +17,17 @@ class LeaveMonitoringScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<LeaveMonitoringScreen> createState() => _LeaveMonitoringScreenState();
+  ConsumerState<LeaveMonitoringScreen> createState() =>
+      _LeaveMonitoringScreenState();
 }
 
-class _LeaveMonitoringScreenState extends State<LeaveMonitoringScreen> {
+class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
   late Future<Map<String, dynamic>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = ApiClient.instance.getLeaveMonitoring();
+    _future = ref.read(apiClientProvider).getLeaveMonitoring();
   }
 
   @override

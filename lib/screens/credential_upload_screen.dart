@@ -2,11 +2,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 
-class CredentialUploadScreen extends StatefulWidget {
+class CredentialUploadScreen extends ConsumerStatefulWidget {
   const CredentialUploadScreen({
     super.key,
     required this.onNavigate,
@@ -17,10 +19,12 @@ class CredentialUploadScreen extends StatefulWidget {
   final Future<void> Function() onSubmitted;
 
   @override
-  State<CredentialUploadScreen> createState() => _CredentialUploadScreenState();
+  ConsumerState<CredentialUploadScreen> createState() =>
+      _CredentialUploadScreenState();
 }
 
-class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
+class _CredentialUploadScreenState
+    extends ConsumerState<CredentialUploadScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
 
@@ -195,7 +199,8 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      final account = await ApiClient.instance.getAccount();
+      final api = ref.read(apiClientProvider);
+      final account = await api.getAccount();
       final employee =
           (account['employee'] as Map?)?.cast<String, dynamic>() ?? {};
       final employeeId = employee['id'];
@@ -206,15 +211,14 @@ class _CredentialUploadScreenState extends State<CredentialUploadScreen> {
         throw Exception('Employee profile not found for this account.');
       }
 
-      final uploadedFilePath = await ApiClient.instance
-          .uploadEmployeeCredentialFile(
-            employeeId: employeeId,
-            employeeAlternateId: employeeAlternateId,
-            fileBytes: _selectedFileBytes!,
-            originalFileName: _selectedFile!.name,
-          );
+      final uploadedFilePath = await api.uploadEmployeeCredentialFile(
+        employeeId: employeeId,
+        employeeAlternateId: employeeAlternateId,
+        fileBytes: _selectedFileBytes!,
+        originalFileName: _selectedFile!.name,
+      );
 
-      await ApiClient.instance.createEmployeeCredential({
+      await api.createEmployeeCredential({
         'employee_id': credentialEmployeeId,
         'credential_type': _mapCredentialType(_credentialType!),
         'title': _resolveTitleForSubmit(),

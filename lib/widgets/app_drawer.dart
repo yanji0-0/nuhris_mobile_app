@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
-import '../theme/app_theme.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class AppDrawer extends StatefulWidget {
+import '../navigation/app_nav.dart';
+import '../theme/app_theme.dart';
+import '../providers/account_provider.dart';
+
+class AppDrawer extends ConsumerWidget {
   const AppDrawer({
     super.key,
     required this.selected,
@@ -16,26 +18,12 @@ class AppDrawer extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<AppDrawer> createState() => _AppDrawerState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final accountAsync = ref.watch(accountProvider);
+    final profileAsync = ref.watch(profilePhotoProvider);
 
-class _AppDrawerState extends State<AppDrawer> {
-  late final Future<Map<String, dynamic>> _accountFuture;
-  late final Future<String?> _profilePhotoUrlFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _accountFuture = ApiClient.instance.getAccount();
-    _profilePhotoUrlFuture = ApiClient.instance.getProfilePhotoUrl();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: _accountFuture,
-      builder: (context, snapshot) {
-        final account = snapshot.data ?? const <String, dynamic>{};
+    return accountAsync.when(
+      data: (account) {
         final user =
             (account['user'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{};
@@ -45,9 +33,10 @@ class _AppDrawerState extends State<AppDrawer> {
 
         final firstName = (employee['first_name'] ?? '').toString().trim();
         final lastName = (employee['last_name'] ?? '').toString().trim();
-        final fullName = [lastName, firstName]
-            .where((part) => part.isNotEmpty)
-            .join(', ');
+        final fullName = [
+          lastName,
+          firstName,
+        ].where((part) => part.isNotEmpty).join(', ');
         final displayName = fullName.isNotEmpty
             ? fullName
             : (user['name'] ?? 'Employee').toString();
@@ -62,7 +51,7 @@ class _AppDrawerState extends State<AppDrawer> {
                 _Header(
                   displayName: displayName,
                   email: email,
-                  profilePhotoUrlFuture: _profilePhotoUrlFuture,
+                  profilePhotoAsync: profileAsync,
                 ),
                 const SizedBox(height: 14),
                 Expanded(
@@ -72,44 +61,44 @@ class _AppDrawerState extends State<AppDrawer> {
                       _DrawerItem(
                         icon: Icons.dashboard_outlined,
                         label: 'Dashboard',
-                        selected: widget.selected == AppNavItem.dashboard,
-                        onTap: () => widget.onSelect(AppNavItem.dashboard),
+                        selected: selected == AppNavItem.dashboard,
+                        onTap: () => onSelect(AppNavItem.dashboard),
                       ),
                       _DrawerItem(
                         icon: Icons.badge_outlined,
                         label: 'Credentials',
-                        selected: widget.selected == AppNavItem.credentials,
-                        onTap: () => widget.onSelect(AppNavItem.credentials),
+                        selected: selected == AppNavItem.credentials,
+                        onTap: () => onSelect(AppNavItem.credentials),
                       ),
                       _DrawerItem(
                         icon: Icons.access_time,
                         label: 'Attendance & DTR',
-                        selected: widget.selected == AppNavItem.attendanceDtr,
-                        onTap: () => widget.onSelect(AppNavItem.attendanceDtr),
+                        selected: selected == AppNavItem.attendanceDtr,
+                        onTap: () => onSelect(AppNavItem.attendanceDtr),
                       ),
                       _DrawerItem(
                         icon: Icons.format_list_bulleted,
                         label: 'WFH Monitoring',
-                        selected: widget.selected == AppNavItem.wfhMonitoring,
-                        onTap: () => widget.onSelect(AppNavItem.wfhMonitoring),
+                        selected: selected == AppNavItem.wfhMonitoring,
+                        onTap: () => onSelect(AppNavItem.wfhMonitoring),
                       ),
                       _DrawerItem(
                         icon: Icons.calendar_month_outlined,
                         label: 'Leave Monitoring',
-                        selected: widget.selected == AppNavItem.leaveMonitoring,
-                        onTap: () => widget.onSelect(AppNavItem.leaveMonitoring),
+                        selected: selected == AppNavItem.leaveMonitoring,
+                        onTap: () => onSelect(AppNavItem.leaveMonitoring),
                       ),
                       _DrawerItem(
                         icon: Icons.notifications_none,
                         label: 'Notifications',
-                        selected: widget.selected == AppNavItem.notifications,
-                        onTap: () => widget.onSelect(AppNavItem.notifications),
+                        selected: selected == AppNavItem.notifications,
+                        onTap: () => onSelect(AppNavItem.notifications),
                       ),
                       _DrawerItem(
                         icon: Icons.person_outline,
                         label: 'Account',
-                        selected: widget.selected == AppNavItem.account,
-                        onTap: () => widget.onSelect(AppNavItem.account),
+                        selected: selected == AppNavItem.account,
+                        onTap: () => onSelect(AppNavItem.account),
                       ),
                     ],
                   ),
@@ -146,12 +135,19 @@ class _AppDrawerState extends State<AppDrawer> {
                       ),
                       InkWell(
                         borderRadius: BorderRadius.circular(10),
-                        onTap: widget.onSignOut,
+                        onTap: onSignOut,
                         child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
                           child: Row(
                             children: [
-                              Icon(Icons.logout, color: Colors.white70, size: 18),
+                              Icon(
+                                Icons.logout,
+                                color: Colors.white70,
+                                size: 18,
+                              ),
                               SizedBox(width: 6),
                               Text(
                                 'Sign Out',
@@ -173,6 +169,26 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
         );
       },
+      loading: () => Drawer(
+        backgroundColor: const Color(0xFF0A1B66),
+        child: const SafeArea(
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+      error: (err, st) => Drawer(
+        backgroundColor: const Color(0xFF0A1B66),
+        child: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Failed to load account: $err',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -181,12 +197,12 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.displayName,
     required this.email,
-    required this.profilePhotoUrlFuture,
+    required this.profilePhotoAsync,
   });
 
   final String displayName;
   final String email;
-  final Future<String?> profilePhotoUrlFuture;
+  final AsyncValue<String?> profilePhotoAsync;
 
   @override
   Widget build(BuildContext context) {
@@ -252,7 +268,7 @@ class _Header extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       letterSpacing: 2,
                     ),
-                  )
+                  ),
                 ],
               ),
             ],
@@ -267,46 +283,59 @@ class _Header extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Row(
               children: [
-              FutureBuilder<String?>(
-                future: profilePhotoUrlFuture,
-                builder: (context, snapshot) {
-                  final photoUrl = snapshot.data;
-                  final hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
-                  
-                  return CircleAvatar(
+                profilePhotoAsync.when(
+                  data: (photoUrl) {
+                    final hasPhoto =
+                        photoUrl != null && photoUrl.trim().isNotEmpty;
+                    return CircleAvatar(
+                      radius: 16,
+                      backgroundColor: AppColors.nuhrisYellow,
+                      backgroundImage: hasPhoto
+                          ? NetworkImage(photoUrl.trim())
+                          : null,
+                      child: !hasPhoto
+                          ? Icon(Icons.person, color: AppColors.navy, size: 18)
+                          : null,
+                    );
+                  },
+                  loading: () => CircleAvatar(
                     radius: 16,
                     backgroundColor: AppColors.nuhrisYellow,
-                    backgroundImage: hasPhoto ? NetworkImage(photoUrl.trim()) : null,
-                    child: !hasPhoto
-                        ? Icon(Icons.person, color: AppColors.navy, size: 18)
-                        : null,
-                  );
-                },
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      email.isNotEmpty ? email : 'No email on record',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                    child: const SizedBox.shrink(),
+                  ),
+                  error: (_, __) => CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.nuhrisYellow,
+                    child: Icon(Icons.person, color: AppColors.navy, size: 18),
+                  ),
                 ),
-              )
-            ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        email.isNotEmpty ? email : 'No email on record',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -362,11 +391,7 @@ class _DrawerItem extends StatelessWidget {
                   ),
                 ),
                 if (selected)
-                  const Icon(
-                    Icons.circle,
-                    size: 9,
-                    color: Color(0xFF041D6D),
-                  ),
+                  const Icon(Icons.circle, size: 9, color: Color(0xFF041D6D)),
               ],
             ),
           ),

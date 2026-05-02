@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+// import 'package:flutter/services.dart'; // removed - unnecessary import
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
 import 'credential_upload_screen.dart';
 
-class CredentialsScreen extends StatefulWidget {
+class CredentialsScreen extends ConsumerStatefulWidget {
   const CredentialsScreen({
     super.key,
     required this.onNavigate,
@@ -18,10 +19,10 @@ class CredentialsScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<CredentialsScreen> createState() => _CredentialsScreenState();
+  ConsumerState<CredentialsScreen> createState() => _CredentialsScreenState();
 }
 
-class _CredentialsScreenState extends State<CredentialsScreen> {
+class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
   int selectedTab = 0;
   bool _isLoading = true;
   String? _error;
@@ -43,7 +44,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
 
   Future<void> _loadCredentials() async {
     try {
-      final data = await ApiClient.instance.getEmployeeCredentials();
+      final api = ref.read(apiClientProvider);
+      final data = await api.getEmployeeCredentials();
       if (!mounted) {
         return;
       }
@@ -423,7 +425,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     }
 
     try {
-      final url = await ApiClient.instance.getCredentialFileUrl(stored);
+      final api = ref.read(apiClientProvider);
+      final url = await api.getCredentialFileUrl(stored);
       if (url == null || url.isEmpty) {
         if (!context.mounted) return;
 
@@ -539,7 +542,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     try {
       final id = item['id'];
       final filePath = (item['file_path'] ?? '').toString();
-      await ApiClient.instance.deleteEmployeeCredential(
+      final api = ref.read(apiClientProvider);
+      await api.deleteEmployeeCredential(
         id: id,
         filePath: filePath.isEmpty ? null : filePath,
       );

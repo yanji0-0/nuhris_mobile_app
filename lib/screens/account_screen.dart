@@ -1,15 +1,17 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
+import '../providers/account_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
-class AccountScreen extends StatefulWidget {
+class AccountScreen extends ConsumerStatefulWidget {
   const AccountScreen({
     super.key,
     required this.onNavigate,
@@ -20,10 +22,10 @@ class AccountScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<AccountScreen> createState() => _AccountScreenState();
+  ConsumerState<AccountScreen> createState() => _AccountScreenState();
 }
 
-class _AccountScreenState extends State<AccountScreen> {
+class _AccountScreenState extends ConsumerState<AccountScreen> {
   String? employeeType;
   String _displayName = 'Employee';
   String _displayEmail = '';
@@ -58,7 +60,51 @@ class _AccountScreenState extends State<AccountScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAccount();
+    // Listen to account and profile photo providers and populate fields when data arrives.
+    ref.listen<AsyncValue<Map<String, dynamic>>>(accountProvider, (prev, next) {
+      next.when(
+        data: (payload) {
+          final user = (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
+          final employee =
+              (payload['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+          final department =
+              (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
+
+          _displayName = (user['name'] ?? 'Employee').toString();
+          _displayEmail = (user['email'] ?? '').toString();
+
+          _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
+          _departmentCtrl.text = (department['name'] ?? '').toString();
+          _positionCtrl.text = (employee['position'] ?? '').toString();
+          _phoneCtrl.text = (employee['phone'] ?? '').toString();
+          _dateHiredCtrl.text = _formatDate(
+            (employee['hire_date'] ?? '').toString(),
+          );
+          _addressCtrl.text = (employee['address'] ?? '').toString();
+          employeeType = _normalizeEmployeeType(employee['employment_type']);
+
+          if (mounted) setState(() => _isLoading = false);
+        },
+        loading: () {
+          if (mounted) setState(() => _isLoading = true);
+        },
+        error: (_, __) {
+          if (mounted) setState(() => _isLoading = false);
+        },
+      );
+    });
+
+    ref.listen<AsyncValue<String?>>(profilePhotoProvider, (prev, next) {
+      next.when(
+        data: (url) {
+          if (url != null && url.trim().isNotEmpty) {
+            if (mounted) setState(() => _profilePhotoUrl = url);
+          }
+        },
+        loading: () {},
+        error: (_, __) {},
+      );
+    });
   }
 
   @override
@@ -73,37 +119,6 @@ class _AccountScreenState extends State<AccountScreen> {
     _newPasswordCtrl.dispose();
     _confirmPasswordCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadAccount() async {
-    try {
-      final payload = await ApiClient.instance.getAccount();
-      final user = (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
-      final employee =
-          (payload['employee'] as Map?)?.cast<String, dynamic>() ?? {};
-      final department =
-          (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
-
-      _displayName = (user['name'] ?? 'Employee').toString();
-      _displayEmail = (user['email'] ?? '').toString();
-
-      _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
-      _departmentCtrl.text = (department['name'] ?? '').toString();
-      _positionCtrl.text = (employee['position'] ?? '').toString();
-      _phoneCtrl.text = (employee['phone'] ?? '').toString();
-      _dateHiredCtrl.text = _formatDate(
-        (employee['hire_date'] ?? '').toString(),
-      );
-      _addressCtrl.text = (employee['address'] ?? '').toString();
-      employeeType = _normalizeEmployeeType(employee['employment_type']);
-      _profilePhotoUrl = await ApiClient.instance.getProfilePhotoUrl();
-    } catch (_) {
-      // Keep empty fallback values if request fails.
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
   }
 
   Future<void> _pickDateHired() async {
@@ -243,13 +258,12 @@ class _AccountScreenState extends State<AccountScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      final result = await ApiClient.instance.uploadProfilePhoto(
-        filePath: file.path,
-      );
+      final api = ref.read(apiClientProvider);
+      final result = await api.uploadProfilePhoto(filePath: file.path);
       final uploadedUrl = (result['url'] ?? '').trim();
       final resolvedUrl = uploadedUrl.isNotEmpty
           ? uploadedUrl
-          : (await ApiClient.instance.getProfilePhotoUrl() ?? '');
+          : (await api.getProfilePhotoUrl() ?? '');
 
       if (!mounted) {
         return;
@@ -267,12 +281,10 @@ class _AccountScreenState extends State<AccountScreen> {
         return;
       }
 
-      final message = error is ApiException
-          ? error.message
-          : error.toString();
+        final message = error.toString();
 
       messenger.showSnackBar(
-        SnackBar(content: Text('Photo upload failed: $message')),
+          SnackBar(content: Text('Photo upload failed: $message')),
       );
     } finally {
       if (mounted) {
@@ -356,7 +368,8 @@ class _AccountScreenState extends State<AccountScreen> {
 
     setState(() => _isChangingPassword = true);
     try {
-      await ApiClient.instance.changePassword(
+      final api = ref.read(apiClientProvider);
+      await api.changePassword(
         currentPassword: currentPassword,
         newPassword: newPassword,
       );
@@ -605,7 +618,8 @@ class _AccountScreenState extends State<AccountScreen> {
                                 final messenger = ScaffoldMessenger.of(context);
                                 setState(() => _isSaving = true);
                                 try {
-                                  await ApiClient.instance.updateAccount({
+                                  final api = ref.read(apiClientProvider);
+                                  await api.updateAccount({
                                     'phone': _phoneCtrl.text.trim(),
                                     'address': _addressCtrl.text.trim(),
                                   });
@@ -843,10 +857,7 @@ class _FieldLabel extends StatelessWidget {
 }
 
 class _ReadOnlyDetailField extends StatelessWidget {
-  const _ReadOnlyDetailField({
-    required this.label,
-    required this.value,
-  });
+  const _ReadOnlyDetailField({required this.label, required this.value});
 
   final String label;
   final String value;

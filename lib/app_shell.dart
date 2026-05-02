@@ -1,75 +1,32 @@
 import 'package:flutter/material.dart';
-import 'app.dart';
-import 'screens/auth/sign_in_screen.dart';
-import 'services/api_client.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class AppShell extends StatefulWidget {
+import 'app.dart';
+import 'providers/session_provider.dart';
+import 'screens/auth/sign_in_screen.dart';
+
+class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(sessionControllerProvider);
+    final controller = ref.read(sessionControllerProvider.notifier);
 
-class _AppShellState extends State<AppShell> {
-  bool isLoggedIn = false;
-  bool _isInitializing = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _bootstrapSession();
-  }
-
-  Future<void> _bootstrapSession() async {
-    final allowed = await ApiClient.instance.hasEmployeeAccess();
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      isLoggedIn = allowed;
-      _isInitializing = false;
-    });
-  }
-
-  Future<String?> _handleSignIn(String email, String password) async {
-    try {
-      await ApiClient.instance.login(email: email, password: password);
-      final allowed = await ApiClient.instance.hasEmployeeAccess();
-      if (!allowed) {
-        return 'Your account is not allowed to access the employee app.';
-      }
-      if (mounted) {
-        setState(() => isLoggedIn = true);
-      }
-      return null;
-    } on ApiException catch (error) {
-      return error.message;
-    } catch (error) {
-      return error.toString();
-    }
-  }
-
-  void _handleSignOut() {
-    ApiClient.instance.logout();
-    setState(() => isLoggedIn = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isInitializing) {
+    if (session.isInitializing) {
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
 
-    if (!isLoggedIn) {
+    if (!session.isLoggedIn) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: SignInScreen(onSignIn: _handleSignIn),
+        home: SignInScreen(onSignIn: controller.signIn),
       );
     }
 
-    return NuhrisEmployeeApp(onSignOut: _handleSignOut);
+    return NuhrisEmployeeApp(onSignOut: controller.signOut);
   }
 }

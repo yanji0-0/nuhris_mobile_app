@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/notifications_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 
-class NotificationsScreen extends StatefulWidget {
+class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({
     super.key,
     required this.onNavigate,
@@ -15,125 +17,63 @@ class NotificationsScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<NotificationsScreen> createState() => _NotificationsScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notificationsState = ref.watch(notificationsControllerProvider);
+    final notificationsController = ref.read(
+      notificationsControllerProvider.notifier,
+    );
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
-  String selectedTab = 'All';
-  List<_NotifItem> items = const [];
-  bool _isLoading = true;
-  String? _error;
+    final list = notificationsState.maybeWhen(
+      data: (items) => items,
+      orElse: () => const <NotificationItem>[],
+    );
 
-  @override
-  void initState() {
-    super.initState();
-    _loadNotifications();
-  }
+    final isLoading = notificationsState.isLoading;
+    final errorText = notificationsState.whenOrNull(
+      error: (error, stackTrace) => error.toString(),
+    );
 
-  Future<void> _loadNotifications() async {
-    try {
-      final rows = await ApiClient.instance.getNotifications();
-      final mapped = rows.map((row) {
-        final announcement =
-            (row['announcement'] as Map?)?.cast<String, dynamic>() ?? {};
-        final priority = (announcement['priority'] ?? 'low').toString();
-        final category = (announcement['target_office'] ?? 'General')
-            .toString();
-        return _NotifItem(
-          id: (row['id'] ?? '').toString(),
-          isRead: (row['is_read'] ?? false) == true,
-          category: category,
-          title: (announcement['title'] ?? 'Notification').toString(),
-          message: (announcement['content'] ?? 'No details provided.')
-              .toString(),
-          dateText: (announcement['published_at'] ?? row['created_at'] ?? '')
-              .toString(),
-          priority: priority,
-          priorityColor: _priorityColor(priority),
-          priorityTextColor: _priorityTextColor(priority),
-          icon: Icons.campaign_outlined,
-          iconColor: AppColors.primaryBlue,
+    Future<void> markAllRead() async {
+      try {
+        await notificationsController.markAllRead();
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to mark all read: $error')),
         );
-      }).toList();
-
-      if (!mounted) {
-        return;
       }
+    }
 
-      setState(() {
-        items = mapped;
-        _isLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
+    Future<void> markNotificationRead(String notificationId) async {
+      try {
+        await notificationsController.markNotificationRead(notificationId);
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to mark notification read: $error')),
+        );
       }
-      setState(() {
-        _error = error.toString();
-        _isLoading = false;
-      });
     }
-  }
 
-  List<String> get tabs {
-    final categories = items.map((e) => e.category).toSet().toList()..sort();
-    return ['All', ...categories];
-  }
-
-  List<_NotifItem> get filtered => items;
-
-  Future<void> _markAllRead() async {
-    setState(() => _isLoading = true);
-    try {
-      await ApiClient.instance.markAllNotificationsRead();
-      await _loadNotifications();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to mark all read: $error')),
-      );
-      setState(() => _isLoading = false);
+    Future<void> clearAll() async {
+      try {
+        await notificationsController.clearAll();
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to clear notifications: $error')),
+        );
+      }
     }
-  }
-
-  Future<void> _markNotificationRead(String notificationId) async {
-    try {
-      await ApiClient.instance.markNotificationRead(notificationId);
-      await _loadNotifications();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to mark notification read: $error')),
-      );
-    }
-  }
-
-  Future<void> _clearAll() async {
-    setState(() => _isLoading = true);
-    try {
-      await ApiClient.instance.clearAllNotifications();
-      await _loadNotifications();
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to clear notifications: $error')),
-      );
-      setState(() => _isLoading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final list = filtered;
 
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.notifications,
         onSelect: (item) {
           Navigator.pop(context);
-          widget.onNavigate(item);
+          onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
+        onSignOut: onSignOut,
       ),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A1B66),
@@ -145,7 +85,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         title: const Text('Notifications'),
         actions: [
           IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
+            onPressed: () => onNavigate(AppNavItem.notifications),
             icon: const Icon(Icons.notifications_none),
             tooltip: 'Notifications',
           ),
@@ -198,16 +138,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              if (_isLoading)
+              if (isLoading)
                 const Padding(
                   padding: EdgeInsets.only(top: 60),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_error != null)
+              else if (errorText != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 60),
                   child: Center(
-                    child: Text('Failed to load notifications: $_error'),
+                    child: Text('Failed to load notifications: $errorText'),
                   ),
                 )
               else ...[
@@ -216,7 +156,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: _markAllRead,
+                      onPressed: markAllRead,
                       style: TextButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: AppColors.primaryBlue,
@@ -233,7 +173,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     ),
                     const SizedBox(width: 8),
                     TextButton(
-                      onPressed: _clearAll,
+                      onPressed: clearAll,
                       style: TextButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xFF374151),
@@ -280,7 +220,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         item: n,
                         onTap: n.isRead
                             ? null
-                            : () => _markNotificationRead(n.id),
+                            : () => markNotificationRead(n.id),
                       ),
                     ),
                   ),
@@ -291,35 +231,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
     );
   }
-
-  // Tab counting removed — tabs UI replaced with Read All / Clear All actions.
-
-  Color _priorityColor(String priority) {
-    switch (priority.toLowerCase()) {
-      case 'high':
-        return const Color(0xFFF4CD67);
-      case 'medium':
-        return const Color(0xFF66B6FF);
-      default:
-        return const Color(0xFFD1FAE5);
-    }
-  }
-
-  Color _priorityTextColor(String priority) {
-    switch (priority.toLowerCase()) {
-      case 'high':
-        return const Color(0xFFB45309);
-      case 'medium':
-        return const Color(0xFF0B4C8C);
-      default:
-        return const Color(0xFF065F46);
-    }
-  }
 }
 
 class _NotificationCard extends StatelessWidget {
   const _NotificationCard({required this.item, this.onTap});
-  final _NotifItem item;
+  final NotificationItem item;
   final VoidCallback? onTap;
 
   Color _getIconBackground(String priority) {
@@ -490,32 +406,4 @@ class _NotificationCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _NotifItem {
-  final String id;
-  final bool isRead;
-  final String category;
-  final String title;
-  final String message;
-  final String dateText;
-  final String priority;
-  final Color priorityColor;
-  final Color priorityTextColor;
-  final IconData icon;
-  final Color iconColor;
-
-  _NotifItem({
-    required this.id,
-    required this.isRead,
-    required this.category,
-    required this.title,
-    required this.message,
-    required this.dateText,
-    required this.priority,
-    required this.priorityColor,
-    required this.priorityTextColor,
-    required this.icon,
-    required this.iconColor,
-  });
 }

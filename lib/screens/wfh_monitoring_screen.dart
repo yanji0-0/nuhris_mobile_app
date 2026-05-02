@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
+import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
 import '../theme/app_theme.dart';
 import 'wfh_monitoring_upload.dart';
 
-class WFHMonitoringScreen extends StatefulWidget {
+class WFHMonitoringScreen extends ConsumerStatefulWidget {
   const WFHMonitoringScreen({
     super.key,
     required this.onNavigate,
@@ -17,10 +18,11 @@ class WFHMonitoringScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<WFHMonitoringScreen> createState() => _WFHMonitoringScreenState();
+  ConsumerState<WFHMonitoringScreen> createState() =>
+      _WFHMonitoringScreenState();
 }
 
-class _WFHMonitoringScreenState extends State<WFHMonitoringScreen> {
+class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _submissions = [];
@@ -33,7 +35,8 @@ class _WFHMonitoringScreenState extends State<WFHMonitoringScreen> {
 
   Future<void> _loadSubmissions() async {
     try {
-      final data = await ApiClient.instance.getWfhMonitoringSubmissions();
+      final api = ref.read(apiClientProvider);
+      final data = await api.getWfhMonitoringSubmissions();
       if (!mounted) return;
       setState(() {
         _submissions = data;
@@ -134,7 +137,8 @@ class _WFHMonitoringScreenState extends State<WFHMonitoringScreen> {
     }
 
     try {
-      final url = await ApiClient.instance.getCredentialFileUrl(stored);
+      final api = ref.read(apiClientProvider);
+      final url = await api.getCredentialFileUrl(stored);
       if (url == null || url.isEmpty) {
         if (!context.mounted) return;
 

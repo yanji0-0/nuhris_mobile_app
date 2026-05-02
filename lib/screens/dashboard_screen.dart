@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/dashboard_calendar.dart';
+import '../providers/dashboard_provider.dart';
 
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({
     super.key,
     required this.onNavigate,
@@ -17,34 +19,138 @@ class DashboardScreen extends StatefulWidget {
   final VoidCallback onSignOut;
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(dashboardProvider);
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  late Future<Map<String, dynamic>> _future;
+    if (state.isLoading) {
+      return Scaffold(
+        drawer: AppDrawer(
+          selected: AppNavItem.dashboard,
+          onSelect: (item) {
+            Navigator.pop(context);
+            onNavigate(item);
+          },
+          onSignOut: onSignOut,
+        ),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF0A1B66),
+          foregroundColor: Colors.white,
+          surfaceTintColor: const Color(0xFF0A1B66),
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          scrolledUnderElevation: 0,
+          title: const Text('Dashboard'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
-  @override
-  void initState() {
-    super.initState();
-    _future = _loadData();
-  }
+    if (state.hasError) {
+      return Scaffold(
+        drawer: AppDrawer(
+          selected: AppNavItem.dashboard,
+          onSelect: (item) {
+            Navigator.pop(context);
+            onNavigate(item);
+          },
+          onSignOut: onSignOut,
+        ),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF0A1B66),
+          foregroundColor: Colors.white,
+          surfaceTintColor: const Color(0xFF0A1B66),
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          scrolledUnderElevation: 0,
+          title: const Text('Dashboard'),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('Failed to load dashboard: ${state.error}'),
+          ),
+        ),
+      );
+    }
 
-  Future<Map<String, dynamic>> _loadData() async {
-    final dashboard = await ApiClient.instance.getDashboard();
-    final notifications = await ApiClient.instance.getNotifications();
-    return {'dashboard': dashboard, 'notifications': notifications};
-  }
+    final payload = state.value ?? {};
+    final dashboard =
+        (payload['dashboard'] as Map?)?.cast<String, dynamic>() ?? {};
+    final notifications = ((payload['notifications'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => e.cast<String, dynamic>())
+        .toList();
 
-  @override
-  Widget build(BuildContext context) {
+    final employee =
+        (dashboard['employee'] as Map?)?.cast<String, dynamic>() ?? {};
+    final leaveSummary =
+        (dashboard['leave_summary'] as Map?)?.cast<String, dynamic>() ?? {};
+    final credentialsSummary =
+        (dashboard['credentials_summary'] as Map?)?.cast<String, dynamic>() ??
+        {};
+    final notificationsSummary =
+        (dashboard['notifications_summary'] as Map?)?.cast<String, dynamic>() ??
+        {};
+
+    final activeCredentialsCount =
+        (credentialsSummary['active_count'] ?? 0) as num;
+    final expiringSoonCount =
+        (credentialsSummary['expiring_soon_count'] ?? 0) as num;
+    final nonCompliantCount =
+        (credentialsSummary['non_compliant_count'] ?? 0) as num;
+    final compliantCount =
+        (credentialsSummary['compliant_count'] ?? activeCredentialsCount)
+            as num;
+    final totalCredentialCount =
+        (credentialsSummary['total_count'] ?? 0) as num;
+    final totalLeaveDays = ((leaveSummary['total_days_remaining'] ?? 0) as num)
+        .toDouble();
+    final totalNotifications =
+        (notificationsSummary['total_count'] ?? notifications.length) as num;
+
+    final firstName = (employee['first_name'] ?? '').toString().trim();
+    final lastName = (employee['last_name'] ?? '').toString().trim();
+    final combinedName = '$firstName $lastName'.trim();
+    final fallbackName = (employee['name'] ?? '').toString().trim();
+    final welcomeName = combinedName.isNotEmpty
+        ? combinedName
+        : (fallbackName.isNotEmpty ? fallbackName : 'Employee');
+
+    final complianceValue =
+        '${compliantCount.toInt()}/${totalCredentialCount.toInt()}';
+    final metrics = [
+      _MetricData(
+        title: 'Active Credentials',
+        value: activeCredentialsCount.toInt().toString(),
+        subtitle: '${expiringSoonCount.toInt()} pending review',
+      ),
+      _MetricData(
+        title: 'Compliance',
+        value: complianceValue,
+        subtitle: 'Up to date',
+      ),
+      _MetricData(
+        title: 'Leave Balance',
+        value: totalLeaveDays % 1 == 0
+            ? totalLeaveDays.toInt().toString()
+            : totalLeaveDays.toStringAsFixed(1),
+        subtitle: 'Total days remaining',
+      ),
+      _MetricData(
+        title: 'Notifications',
+        value: totalNotifications.toInt().toString(),
+        subtitle: 'Recent alerts',
+      ),
+    ];
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.dashboard,
         onSelect: (item) {
           Navigator.pop(context);
-          widget.onNavigate(item);
+          onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
+        onSignOut: onSignOut,
       ),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A1B66),
@@ -55,404 +161,290 @@ class _DashboardScreenState extends State<DashboardScreen> {
         scrolledUnderElevation: 0,
         title: const Text('Dashboard'),
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 1100;
+          final horizontalPad = isWide ? 22.0 : 14.0;
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('Failed to load dashboard: ${snapshot.error}'),
+          final metricsGrid = GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: metrics.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: isWide ? 4 : 2,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: isWide
+                  ? 2.8
+                  : (constraints.maxWidth < 420 ? 1.45 : 1.65),
+            ),
+            itemBuilder: (context, index) => _MetricCard(data: metrics[index]),
+          );
+
+          final complianceTitleSize = constraints.maxWidth >= 900 ? 36.0 : 28.0;
+
+          final compliancePanel = Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Compliance Status',
+                    style: TextStyle(
+                      color: const Color(0xFF11284F),
+                      fontSize: complianceTitleSize,
+                      fontWeight: FontWeight.w900,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _StatusRow(
+                    label: 'Compliant',
+                    color: AppColors.green,
+                    value: compliantCount.toInt().toString(),
+                  ),
+                  const SizedBox(height: 10),
+                  _StatusRow(
+                    label: 'Expiring Soon',
+                    color: AppColors.orange,
+                    value: expiringSoonCount.toInt().toString(),
+                  ),
+                  const SizedBox(height: 10),
+                  _StatusRow(
+                    label: 'Non-Compliant',
+                    color: AppColors.red,
+                    value: nonCompliantCount.toInt().toString(),
+                  ),
+                ],
               ),
-            );
-          }
-
-          final payload = snapshot.data ?? {};
-          final dashboard =
-              (payload['dashboard'] as Map?)?.cast<String, dynamic>() ?? {};
-          final notifications =
-              ((payload['notifications'] as List?) ?? const [])
-                  .whereType<Map>()
-                  .map((e) => e.cast<String, dynamic>())
-                  .toList();
-
-          final employee =
-              (dashboard['employee'] as Map?)?.cast<String, dynamic>() ?? {};
-          final leaveSummary =
-              (dashboard['leave_summary'] as Map?)?.cast<String, dynamic>() ??
-              {};
-          final credentialsSummary =
-              (dashboard['credentials_summary'] as Map?)
-                  ?.cast<String, dynamic>() ??
-              {};
-          final notificationsSummary =
-              (dashboard['notifications_summary'] as Map?)
-                  ?.cast<String, dynamic>() ??
-              {};
-
-          final activeCredentialsCount =
-              (credentialsSummary['active_count'] ?? 0) as num;
-          final expiringSoonCount =
-              (credentialsSummary['expiring_soon_count'] ?? 0) as num;
-          final nonCompliantCount =
-              (credentialsSummary['non_compliant_count'] ?? 0) as num;
-          final compliantCount =
-              (credentialsSummary['compliant_count'] ?? activeCredentialsCount)
-                  as num;
-          final totalCredentialCount =
-              (credentialsSummary['total_count'] ?? 0) as num;
-          final totalLeaveDays =
-              ((leaveSummary['total_days_remaining'] ?? 0) as num).toDouble();
-          final totalNotifications =
-              (notificationsSummary['total_count'] ?? notifications.length)
-                  as num;
-
-          final firstName = (employee['first_name'] ?? '').toString().trim();
-          final lastName = (employee['last_name'] ?? '').toString().trim();
-          final combinedName = '$firstName $lastName'.trim();
-          final fallbackName = (employee['name'] ?? '').toString().trim();
-          final welcomeName = combinedName.isNotEmpty
-              ? combinedName
-              : (fallbackName.isNotEmpty ? fallbackName : 'Employee');
-
-          final complianceValue =
-              '${compliantCount.toInt()}/${totalCredentialCount.toInt()}';
-          final metrics = [
-            _MetricData(
-              title: 'Active Credentials',
-              value: activeCredentialsCount.toInt().toString(),
-              subtitle: '${expiringSoonCount.toInt()} pending review',
             ),
-            _MetricData(
-              title: 'Compliance',
-              value: complianceValue,
-              subtitle: 'Up to date',
-            ),
-            _MetricData(
-              title: 'Leave Balance',
-              value: totalLeaveDays % 1 == 0
-                  ? totalLeaveDays.toInt().toString()
-                  : totalLeaveDays.toStringAsFixed(1),
-              subtitle: 'Total days remaining',
-            ),
-            _MetricData(
-              title: 'Notifications',
-              value: totalNotifications.toInt().toString(),
-              subtitle: 'Recent alerts',
-            ),
-          ];
+          );
 
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 1100;
-              final horizontalPad = isWide ? 22.0 : 14.0;
-
-              final metricsGrid = GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: metrics.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: isWide ? 4 : 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: isWide
-                      ? 2.8
-                      : (constraints.maxWidth < 420 ? 1.45 : 1.65),
-                ),
-                itemBuilder: (context, index) =>
-                    _MetricCard(data: metrics[index]),
-              );
-
-              final complianceTitleSize =
-                  constraints.maxWidth >= 900 ? 36.0 : 28.0;
-
-              final compliancePanel = Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          final recentAlertsPanel = Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        'Compliance Status',
-                        style: TextStyle(
-                          color: Color(0xFF11284F),
-                          fontSize: complianceTitleSize,
-                          fontWeight: FontWeight.w900,
-                          height: 1.0,
+                      const Expanded(
+                        child: Text(
+                          'Recent Alerts',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      _StatusRow(
-                        label: 'Compliant',
-                        color: AppColors.green,
-                        value: compliantCount.toInt().toString(),
-                      ),
-                      const SizedBox(height: 10),
-                      _StatusRow(
-                        label: 'Expiring Soon',
-                        color: AppColors.orange,
-                        value: expiringSoonCount.toInt().toString(),
-                      ),
-                      const SizedBox(height: 10),
-                      _StatusRow(
-                        label: 'Non-Compliant',
-                        color: AppColors.red,
-                        value: nonCompliantCount.toInt().toString(),
+                      TextButton(
+                        onPressed: () => onNavigate(AppNavItem.notifications),
+                        child: const Text('View All'),
                       ),
                     ],
                   ),
-                ),
-              );
+                  const SizedBox(height: 8),
+                  if (notifications.isEmpty)
+                    const Text(
+                      'No recent alerts available.',
+                      style: TextStyle(color: AppColors.mutedText),
+                    )
+                  else
+                    ...notifications.take(3).map((n) {
+                      final announcement =
+                          (n['announcement'] as Map?)
+                              ?.cast<String, dynamic>() ??
+                          {};
+                      final title = (announcement['title'] ?? 'Notification')
+                          .toString();
+                      final timestamp =
+                          (announcement['published_at'] ??
+                                  n['created_at'] ??
+                                  '')
+                              .toString();
 
-              final recentAlertsPanel = Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Recent Alerts',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
                           ),
-                          TextButton(
-                            onPressed: () =>
-                                widget.onNavigate(AppNavItem.notifications),
-                            child: const Text('View All'),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7F9FD),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFDCE2ED)),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (notifications.isEmpty)
-                        const Text(
-                          'No recent alerts available.',
-                          style: TextStyle(color: AppColors.mutedText),
-                        )
-                      else
-                        ...notifications.take(3).map((n) {
-                          final announcement =
-                              (n['announcement'] as Map?)
-                                  ?.cast<String, dynamic>() ??
-                              {};
-                          final title =
-                              (announcement['title'] ?? 'Notification')
-                                  .toString();
-                          final timestamp =
-                              (announcement['published_at'] ??
-                                      n['created_at'] ??
-                                      '')
-                                  .toString();
-
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF7F9FD),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: const Color(0xFFDCE2ED),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    title,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _formatTimestamp(timestamp),
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.mutedText,
-                                    ),
-                                  ),
-                                ],
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatTimestamp(timestamp),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.mutedText,
+                                ),
                               ),
-                            ),
-                          );
-                        }),
-                    ],
-                  ),
-                ),
-              );
-
-              final calendarPanel = Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'System Calendar',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DashboardCalendar(),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'UPCOMING EVENTS',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.mutedText,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (notifications.isEmpty)
-                        const Text(
-                          'No upcoming events yet.',
-                          style: TextStyle(color: AppColors.mutedText),
-                        )
-                      else
-                        ...notifications.take(2).map((n) {
-                          final announcement =
-                              (n['announcement'] as Map?)
-                                  ?.cast<String, dynamic>() ??
-                              {};
-                          final title =
-                              (announcement['title'] ?? 'Notification')
-                                  .toString();
-                          final subtitle =
-                              (announcement['published_at'] ??
-                                      n['created_at'] ??
-                                      '')
-                                  .toString();
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _EventRow(
-                              color: AppColors.primaryBlue,
-                              title: title,
-                              subtitle: _formatTimestamp(subtitle),
-                            ),
-                          );
-                        }),
-                    ],
-                  ),
-                ),
-              );
-
-              if (!isWide) {
-                return ListView(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  children: [
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: Text(
-                        'Welcome back, $welcomeName!',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: const Text(
-                        'Here is an overview of your HR information.',
-                        style: TextStyle(
-                          color: AppColors.mutedText,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: metricsGrid,
-                    ),
-                    const SizedBox(height: 12),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: compliancePanel,
-                    ),
-                    const SizedBox(height: 12),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: recentAlertsPanel,
-                    ),
-                    const SizedBox(height: 12),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                      child: calendarPanel,
-                    ),
-                  ],
-                );
-              }
-
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  horizontalPad,
-                  10,
-                  horizontalPad,
-                  18,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Welcome back, $welcomeName!',
-                      style: const TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Here is an overview of your HR information.',
-                      style: TextStyle(
-                        color: AppColors.mutedText,
-                        fontSize: 22,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    metricsGrid,
-                    const SizedBox(height: 14),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: Column(
-                            children: [
-                              compliancePanel,
-                              const SizedBox(height: 14),
-                              recentAlertsPanel,
                             ],
                           ),
                         ),
-                        const SizedBox(width: 14),
-                        Expanded(child: calendarPanel),
-                      ],
+                      );
+                    }),
+                ],
+              ),
+            ),
+          );
+
+          final calendarPanel = Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'System Calendar',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 12),
+                  DashboardCalendar(),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'UPCOMING EVENTS',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.mutedText,
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (notifications.isEmpty)
+                    const Text(
+                      'No upcoming events yet.',
+                      style: TextStyle(color: AppColors.mutedText),
+                    )
+                  else
+                    ...notifications.take(2).map((n) {
+                      final announcement =
+                          (n['announcement'] as Map?)
+                              ?.cast<String, dynamic>() ??
+                          {};
+                      final title = (announcement['title'] ?? 'Notification')
+                          .toString();
+                      final subtitle =
+                          (announcement['published_at'] ??
+                                  n['created_at'] ??
+                                  '')
+                              .toString();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _EventRow(
+                          color: AppColors.primaryBlue,
+                          title: title,
+                          subtitle: _formatTimestamp(subtitle),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
+          );
+
+          if (!isWide) {
+            return ListView(
+              padding: const EdgeInsets.only(bottom: 18),
+              children: [
+                const SizedBox(height: 10),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: Text(
+                    'Welcome back, $welcomeName!',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: const Text(
+                    'Here is an overview of your HR information.',
+                    style: TextStyle(color: AppColors.mutedText, fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: metricsGrid,
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: compliancePanel,
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: recentAlertsPanel,
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                  child: calendarPanel,
+                ),
+              ],
+            );
+          }
+
+          return SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(horizontalPad, 10, horizontalPad, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome back, $welcomeName!',
+                  style: const TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Here is an overview of your HR information.',
+                  style: TextStyle(color: AppColors.mutedText, fontSize: 22),
+                ),
+                const SizedBox(height: 14),
+                metricsGrid,
+                const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        children: [
+                          compliancePanel,
+                          const SizedBox(height: 14),
+                          recentAlertsPanel,
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(child: calendarPanel),
                   ],
                 ),
-              );
-            },
+              ],
+            ),
           );
         },
       ),
@@ -460,13 +452,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _formatTimestamp(String value) {
-    if (value.isEmpty) {
-      return '-';
-    }
+    if (value.isEmpty) return '-';
     final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return value;
-    }
+    if (parsed == null) return value;
     return DateFormat('MMM d, hh:mm a').format(parsed.toLocal());
   }
 }

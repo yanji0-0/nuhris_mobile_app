@@ -3,7 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ApiClient {
+import 'api_client_contract.dart';
+
+class ApiClient implements AppApiClient {
   ApiClient._();
 
   static final ApiClient instance = ApiClient._();
@@ -36,6 +38,7 @@ class ApiClient {
     'uploads',
   ];
 
+  @override
   Future<bool> hasEmployeeAccess() async {
     if (!isAuthenticated) {
       return false;
@@ -64,6 +67,7 @@ class ApiClient {
     return false;
   }
 
+  @override
   Future<void> login({required String email, required String password}) async {
     final normalizedEmail = email.trim().toLowerCase();
 
@@ -133,6 +137,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<void> logout() async {
     try {
       await _client.auth.signOut();
@@ -144,6 +149,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<Map<String, dynamic>> getDashboard() async {
     final employee = await _currentEmployee();
     if (employee == null) {
@@ -360,6 +366,7 @@ class ApiClient {
     };
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getAttendanceDtr() async {
     final employee = await _currentEmployee();
     if (employee == null) {
@@ -377,6 +384,7 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  @override
   Future<Map<String, dynamic>> submitEmployeeSchedule({
     required String termLabel,
     required List<Map<String, dynamic>> days,
@@ -471,6 +479,7 @@ class ApiClient {
     };
   }
 
+  @override
   Future<Map<String, dynamic>> getLeaveMonitoring() async {
     final employee = await _currentEmployee();
     if (employee == null) {
@@ -541,6 +550,7 @@ class ApiClient {
     };
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getNotifications() async {
     final user = await _currentUserRow();
     if (user == null || user['id'] == null) {
@@ -558,6 +568,7 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  @override
   Future<void> markAllNotificationsRead() async {
     final user = await _currentUserRow();
     if (user == null || user['id'] == null) {
@@ -577,6 +588,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<void> markNotificationRead(String notificationId) async {
     final user = await _currentUserRow();
     if (user == null || user['id'] == null) {
@@ -597,6 +609,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<void> clearAllNotifications() async {
     final user = await _currentUserRow();
     if (user == null || user['id'] == null) {
@@ -613,6 +626,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<Map<String, dynamic>> getAccount() async {
     final user = await _currentUserRow();
     final employee = await _currentEmployee();
@@ -620,6 +634,7 @@ class ApiClient {
     return {'user': user, 'employee': employee};
   }
 
+  @override
   Future<Map<String, dynamic>> updateAccount(
     Map<String, dynamic> payload,
   ) async {
@@ -666,6 +681,7 @@ class ApiClient {
     return {'message': 'Account updated successfully.', ...refreshed};
   }
 
+  @override
   Future<Map<String, String>> uploadProfilePhoto({
     required String filePath,
   }) async {
@@ -751,6 +767,7 @@ class ApiClient {
     );
   }
 
+  @override
   Future<String?> getProfilePhotoUrl() async {
     final user = await _currentUserRow();
     final employee = await _currentEmployee();
@@ -831,6 +848,7 @@ class ApiClient {
     return null;
   }
 
+  @override
   Future<void> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -951,6 +969,7 @@ class ApiClient {
     );
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getEmployeeCredentials() async {
     final employee = await _currentEmployee();
     if (employee == null || employee['id'] == null) {
@@ -968,6 +987,7 @@ class ApiClient {
     return _toMapList(rows);
   }
 
+  @override
   Future<String?> getCredentialFileUrl(String storedPath) async {
     final normalized = storedPath.trim();
     if (normalized.isEmpty) return null;
@@ -1030,15 +1050,7 @@ class ApiClient {
     return null;
   }
 
-  Future<List<String>> _listAvailableBuckets() async {
-    try {
-      final buckets = await _client.storage.listBuckets();
-      return buckets.map((b) => b.name).toList();
-    } catch (_) {
-      return const [];
-    }
-  }
-
+  @override
   Future<void> deleteEmployeeCredential({
     required dynamic id,
     String? filePath,
@@ -1089,6 +1101,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<Map<String, dynamic>> createEmployeeCredential(
     Map<String, dynamic> payload,
   ) async {
@@ -1151,6 +1164,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<String> uploadEmployeeCredentialFile({
     required dynamic employeeId,
     dynamic employeeAlternateId,
@@ -1245,6 +1259,7 @@ class ApiClient {
     );
   }
 
+  @override
   Future<Map<String, dynamic>> submitWfhMonitoring({
     required dynamic employeeId,
     required String wfhDate,
@@ -1286,6 +1301,7 @@ class ApiClient {
     }
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() async {
     final employee = await _currentEmployee();
     if (employee == null || employee['id'] == null) {
