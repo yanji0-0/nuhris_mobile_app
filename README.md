@@ -24,6 +24,16 @@ The app is built around Riverpod state management and a Supabase-backed data lay
 - File upload and preview support via `file_picker` and `webview_flutter`
 - Multi-platform targets: Android, iOS, and Web
 
+## Recent Changes
+
+- Session handling: improved initialization and gating logic in the session provider (`lib/providers/session_provider.dart`).
+- Backend client: updated API client methods and integration points (`lib/services/api_client.dart`).
+- UI updates: refinements across several screens and widgets for stability and UX improvements (dashboard, attendance/DTR, credentials, notifications, leave/WFH, account). See `lib/screens/` and `lib/widgets/`.
+- Android: minor manifest adjustments for runtime behavior (`android/app/src/main/AndroidManifest.xml`).
+- New/updated widget: added `lib/widgets/nuhris_app_bar.dart` and adjustments to `lib/widgets/app_drawer.dart`.
+
+These changes are staged locally and ready for review; do not push until you've reviewed and confirmed behaviour on device/emulator.
+
 ## Backend Integration
 
 See [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md) for the separate backend setup guide, service flow, and integration notes.

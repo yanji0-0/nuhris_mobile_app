@@ -10,6 +10,7 @@ import '../providers/api_client_provider.dart';
 import '../providers/account_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
   const AccountScreen({
@@ -75,7 +76,15 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             final department =
                 (employee['department'] as Map?)?.cast<String, dynamic>() ?? {};
 
-            _displayName = (user['name'] ?? 'Employee').toString();
+            final firstName = (employee['first_name'] ?? '').toString().trim();
+            final lastName = (employee['last_name'] ?? '').toString().trim();
+            final empCombined = (lastName.isNotEmpty && firstName.isNotEmpty)
+              ? '${lastName}, ${firstName}'
+              : ((employee['name'] ?? '').toString().trim());
+
+            _displayName = empCombined.isNotEmpty
+              ? empCombined
+              : (user['name'] ?? 'Employee').toString();
             _displayEmail = (user['email'] ?? '').toString();
 
             _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
@@ -427,23 +436,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1B66),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A1B66),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text('Account'),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Account',
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(8, 14, 8, 18),

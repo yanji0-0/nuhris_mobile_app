@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 import 'credential_upload_screen.dart';
 
 class CredentialsScreen extends ConsumerStatefulWidget {
@@ -634,26 +635,11 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A2E86),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A2E86),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'Credentials',
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none_rounded),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Credentials',
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: Container(
         decoration: const BoxDecoration(

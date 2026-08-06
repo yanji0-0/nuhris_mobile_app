@@ -5,6 +5,7 @@ import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class LeaveMonitoringScreen extends ConsumerStatefulWidget {
   const LeaveMonitoringScreen({
@@ -39,26 +40,11 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A2E86),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A2E86),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'Leave Monitoring',
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none_rounded),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Leave Monitoring',
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
@@ -81,18 +67,23 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           }
 
           final payload = snapshot.data ?? {};
-          final balances = ((payload['balances'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList()
-            ..sort(_compareNewestFirst);
-          final requests = ((payload['requests'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList()
-            ..sort(_compareNewestFirst);
+          final balances =
+              ((payload['balances'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => e.cast<String, dynamic>())
+                  .toList()
+                ..sort(_compareNewestFirst);
+          final requests =
+              ((payload['requests'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => e.cast<String, dynamic>())
+                  .toList()
+                ..sort(_compareNewestFirst);
           final usageSummary = _buildLeaveUsageSummary(requests);
-          final breakdown = _buildLeaveUsageBreakdown(requests);
+          final remainingBalances = _buildRemainingBalanceSummary(
+            balances,
+            requests,
+          );
 
           return Container(
             decoration: const BoxDecoration(
@@ -113,20 +104,22 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                 children: [
                   const SizedBox(height: 6),
                   const Text(
-                    'View your leave balances and history.\nLeave data is managed by HR (read-only).',
+                    'View your leave balances and history. Leave data is managed by HR (read-only).',
                     style: TextStyle(
                       color: AppColors.mutedText,
                       fontSize: 16,
-                      height: 1.35,
+                      height: 1.25,
                       fontWeight: FontWeight.w400,
                     ),
                   ),
                   const SizedBox(height: 14),
                   _LeaveUsageSummaryPanel(usageSummary: usageSummary),
                   const SizedBox(height: 18),
-                  _BalancePanel(balances: balances),
+                  _RemainingBalanceSection(balances: remainingBalances),
                   const SizedBox(height: 18),
-                  _LeaveUsageBreakdownPanel(breakdown: breakdown),
+                  _LeaveUsageBreakdownPanel(
+                    breakdown: _buildLeaveUsageBreakdown(requests),
+                  ),
                   const SizedBox(height: 18),
                   const Text(
                     'Leave History',
@@ -352,6 +345,59 @@ Map<String, List<Map<String, dynamic>>> _buildLeaveUsageBreakdown(
   };
 }
 
+Map<String, Map<String, dynamic>> _buildRemainingBalanceSummary(
+  List<Map<String, dynamic>> balances,
+  List<Map<String, dynamic>> requests,
+) {
+  final totalByType = <String, double>{};
+
+  for (final request in requests) {
+    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
+      continue;
+    }
+
+    final leaveType = _normalizedLeaveType(
+      (request['leave_type'] ?? '').toString(),
+    );
+    final daysUsed = _toDouble(request['days_deducted']);
+
+    if (leaveType.contains('vacation')) {
+      totalByType['vacation'] = (totalByType['vacation'] ?? 0) + daysUsed;
+    } else if (leaveType.contains('sick')) {
+      totalByType['sick'] = (totalByType['sick'] ?? 0) + daysUsed;
+    } else if (leaveType.contains('emergency')) {
+      totalByType['emergency'] = (totalByType['emergency'] ?? 0) + daysUsed;
+    }
+  }
+
+  final result = <String, Map<String, dynamic>>{};
+
+  for (final type in const ['emergency', 'sick', 'vacation']) {
+    final balanceRow = balances.cast<Map<String, dynamic>>().firstWhere(
+      (row) => _normalizedLeaveType(
+        (row['leave_type'] ?? '').toString(),
+      ).contains(type),
+      orElse: () => <String, dynamic>{
+        'leave_type': '${type[0].toUpperCase()}${type.substring(1)} Leave',
+        'remaining_days': 0,
+      },
+    );
+
+    final label = (balanceRow['leave_type'] ?? '').toString();
+    final remainingDays = _remainingDays(balanceRow['remaining_days']);
+
+    result[type] = {
+      'label': label.isEmpty
+          ? '${type[0].toUpperCase()}${type.substring(1)} Leave'
+          : label,
+      'remaining_days': remainingDays,
+      'used_days': _formatDaysUsed(totalByType[type] ?? 0),
+    };
+  }
+
+  return result;
+}
+
 String _formatDaysUsed(dynamic value) {
   final days = _toDouble(value);
   if (days == days.roundToDouble()) {
@@ -380,125 +426,8 @@ DateTime _parseNewestDate(Map<String, dynamic> item) {
   return DateTime.fromMillisecondsSinceEpoch(0);
 }
 
-int _compareNewestFirst(
-  Map<String, dynamic> left,
-  Map<String, dynamic> right,
-) {
+int _compareNewestFirst(Map<String, dynamic> left, Map<String, dynamic> right) {
   return _parseNewestDate(right).compareTo(_parseNewestDate(left));
-}
-
-class _BalancePanel extends StatelessWidget {
-  const _BalancePanel({required this.balances});
-
-  final List<Map<String, dynamic>> balances;
-
-  @override
-  Widget build(BuildContext context) {
-    if (balances.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF6F8FE),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFCAD7F7), width: 1.2),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF4D79F0), width: 2),
-              ),
-              child: const Icon(
-                Icons.info_outline_rounded,
-                size: 16,
-                color: Color(0xFF4D79F0),
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'No leave balance data available yet.\nHR will upload this information.',
-                style: TextStyle(
-                  color: Color(0xFF2A4EA8),
-                  fontSize: 13,
-                  height: 1.35,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: balances.take(4).map((balance) {
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFFE6EAF3)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0F204070),
-                blurRadius: 20,
-                offset: Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF1FF),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.beach_access_rounded,
-                  color: Color(0xFF2852C7),
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (balance['leave_type'] ?? 'Leave').toString(),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_remainingDays(balance['remaining_days'])} remaining',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.mutedText,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
 }
 
 class _LeaveUsageSummaryPanel extends StatelessWidget {
@@ -511,44 +440,41 @@ class _LeaveUsageSummaryPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Leave Usage Summary',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF111827),
-          ),
-        ),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 1,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          childAspectRatio: 3.2,
-          children: [
-            _UsageSummaryCard(
-              label: 'Vacation Used',
-              value: _formatDaysUsed(usageSummary['Vacation Used']),
-              foreground: const Color(0xFF1F8A46),
-              background: const Color(0xFFE7F8EC),
-              border: const Color(0xFFBFE6CD),
-            ),
-            _UsageSummaryCard(
-              label: 'Sick Used',
-              value: _formatDaysUsed(usageSummary['Sick Used']),
-              foreground: const Color(0xFFB7791F),
-              background: const Color(0xFFFFF4DD),
-              border: const Color(0xFFF1D79B),
-            ),
-            _UsageSummaryCard(
-              label: 'Emergency Used',
-              value: _formatDaysUsed(usageSummary['Emergency Used']),
-              foreground: const Color(0xFF7C3AED),
-              background: const Color(0xFFF1E9FF),
-              border: const Color(0xFFDCC8FF),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 620 ? 3 : 1;
+            return GridView.count(
+              crossAxisCount: columns,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: columns == 3 ? 2.25 : 3.1,
+              children: [
+                _UsageSummaryCard(
+                  label: 'Vacation Used',
+                  value: _formatDaysUsed(usageSummary['Vacation Used']),
+                  foreground: const Color(0xFF1F8A46),
+                  background: const Color(0xFFE9FAEF),
+                  border: const Color(0xFFBFE6CD),
+                ),
+                _UsageSummaryCard(
+                  label: 'Sick Used',
+                  value: _formatDaysUsed(usageSummary['Sick Used']),
+                  foreground: const Color(0xFFE68A00),
+                  background: const Color(0xFFFFF7E6),
+                  border: const Color(0xFFF3D79D),
+                ),
+                _UsageSummaryCard(
+                  label: 'Emergency Used',
+                  value: _formatDaysUsed(usageSummary['Emergency Used']),
+                  foreground: const Color(0xFF7C3AED),
+                  background: const Color(0xFFF2E9FF),
+                  border: const Color(0xFFDCC8FF),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -576,28 +502,147 @@ class _UsageSummaryCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: foreground,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontWeight: FontWeight.w500,
+              fontSize: 14,
             ),
           ),
+          const SizedBox(height: 6),
           Text(
             value,
             style: TextStyle(
               color: foreground,
               fontWeight: FontWeight.w800,
-              fontSize: 28,
+              fontSize: 32,
+              height: 1.0,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RemainingBalanceSection extends StatelessWidget {
+  const _RemainingBalanceSection({required this.balances});
+
+  final Map<String, Map<String, dynamic>> balances;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _RemainingBalanceCard(
+        label: (balances['emergency']?['label'] ?? 'Emergency Leave')
+            .toString(),
+        value: (balances['emergency']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF2B57D1),
+      ),
+      _RemainingBalanceCard(
+        label: (balances['sick']?['label'] ?? 'Sick Leave').toString(),
+        value: (balances['sick']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF1D4ED8),
+      ),
+      _RemainingBalanceCard(
+        label: (balances['vacation']?['label'] ?? 'Vacation Leave').toString(),
+        value: (balances['vacation']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF1E40AF),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Remaining Leave Balance',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF111827),
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 620 ? 3 : 1;
+            return GridView.count(
+              crossAxisCount: columns,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: columns == 3 ? 1.18 : 2.7,
+              children: cards,
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _RemainingBalanceCard extends StatelessWidget {
+  const _RemainingBalanceCard({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.18), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D1F2937),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: accent.withValues(alpha: 0.88),
+              fontWeight: FontWeight.w500,
+              fontSize: 13.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: TextStyle(
+              color: const Color(0xFF1E2B6C),
+              fontWeight: FontWeight.w800,
+              fontSize: 32,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Remaining days',
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 12.5),
           ),
         ],
       ),
@@ -1029,3 +1074,4 @@ class _FooterNote extends StatelessWidget {
     );
   }
 }
+

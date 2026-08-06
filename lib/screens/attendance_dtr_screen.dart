@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
-import '../services/api_client.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class AttendanceDtrScreen extends ConsumerStatefulWidget {
   const AttendanceDtrScreen({
@@ -24,10 +25,14 @@ class AttendanceDtrScreen extends ConsumerStatefulWidget {
 
 class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
   late Future<List<Map<String, dynamic>>> _future;
+  late DateTime _visibleMonth;
+  bool _didSyncVisibleMonth = false;
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _visibleMonth = DateTime(now.year, now.month, 1);
     _future = ref.read(apiClientProvider).getAttendanceDtr();
   }
 
@@ -40,23 +45,11 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1B66),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A1B66),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text('Attendance & DTR'),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Attendance & DTR',
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(12, 14, 12, 20),
@@ -90,19 +83,34 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
               }
 
               final records = snapshot.data ?? const [];
-              final tardiness = records.fold<int>(
+              if (!_didSyncVisibleMonth && records.isNotEmpty) {
+                final latestRecordMonth = _parseRecordMonth(records.first);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted || _didSyncVisibleMonth) return;
+                  setState(() {
+                    _visibleMonth = latestRecordMonth ?? _visibleMonth;
+                    _didSyncVisibleMonth = true;
+                  });
+                });
+              }
+
+              final monthRecords = records
+                  .where((record) => _isInVisibleMonth(record['record_date']))
+                  .toList();
+
+              final tardiness = monthRecords.fold<int>(
                 0,
                 (sum, r) => sum + _toInt(r['tardiness_minutes']),
               );
-              final undertime = records.fold<int>(
+              final undertime = monthRecords.fold<int>(
                 0,
                 (sum, r) => sum + _toInt(r['undertime_minutes']),
               );
-              final overtime = records.fold<int>(
+              final overtime = monthRecords.fold<int>(
                 0,
                 (sum, r) => sum + _toInt(r['overtime_minutes']),
               );
-              final absences = records
+              final absences = monthRecords
                   .where((r) => _displayStatus(r) == 'Absent')
                   .length;
 
@@ -117,6 +125,87 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                         const _WeeklyScheduleComposer(),
                         const SizedBox(height: 18),
                       ],
+                      Card(
+                        elevation: 0,
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          side: const BorderSide(color: Color(0xFFD7E0ED)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE9EFFD),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.calendar_month_outlined,
+                                  color: Color(0xFF245FD2),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Viewing Month',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      DateFormat('MMMM yyyy').format(
+                                        _visibleMonth,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF0F1D3A),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Previous month',
+                                onPressed: () {
+                                  setState(() {
+                                    _visibleMonth = DateTime(
+                                      _visibleMonth.year,
+                                      _visibleMonth.month - 1,
+                                      1,
+                                    );
+                                  });
+                                },
+                                icon: const Icon(Icons.chevron_left),
+                              ),
+                              IconButton(
+                                tooltip: 'Next month',
+                                onPressed: () {
+                                  setState(() {
+                                    _visibleMonth = DateTime(
+                                      _visibleMonth.year,
+                                      _visibleMonth.month + 1,
+                                      1,
+                                    );
+                                  });
+                                },
+                                icon: const Icon(Icons.chevron_right),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       Wrap(
                         spacing: 10,
                         runSpacing: 10,
@@ -163,7 +252,7 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                           ),
                           _MetricCard(
                             title: 'Workload Credits',
-                            value: records.length.toString(),
+                            value: monthRecords.length.toString(),
                             icon: Icons.event_note_outlined,
                             iconColor: const Color(0xFF7B3FE4),
                             iconBackground: const Color(0xFFF2ECFE),
@@ -226,11 +315,11 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                           ],
                                         ),
                                       ),
-                                      if (records.isEmpty) ...[
+                                      if (monthRecords.isEmpty) ...[
                                         const SizedBox(height: 36),
                                         const Center(
                                           child: Text(
-                                            'No attendance records found',
+                                            'No attendance records found for this month',
                                             style: TextStyle(
                                               color: Color(0xFF9EA3AA),
                                               fontWeight: FontWeight.w600,
@@ -240,7 +329,7 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                         const SizedBox(height: 36),
                                       ] else ...[
                                         const SizedBox(height: 6),
-                                        ...records
+                                        ...monthRecords
                                             .take(20)
                                             .map(
                                               (record) => Padding(
@@ -339,16 +428,38 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  String _formatDate(Object? value) {
+  DateTime? _parseRecordMonth(Map<String, dynamic> record) {
+    final date = _parseDate(record['record_date']);
+    if (date == null) {
+      return null;
+    }
+    return DateTime(date.year, date.month, 1);
+  }
+
+  DateTime? _parseDate(Object? value) {
     final text = (value ?? '').toString();
     if (text.length < 10) {
-      return text;
+      return null;
     }
 
     final datePortion = text.substring(0, 10);
-    final parsed = DateTime.tryParse(datePortion);
+    return DateTime.tryParse(datePortion);
+  }
+
+  bool _isInVisibleMonth(Object? value) {
+    final parsed = _parseDate(value);
     if (parsed == null) {
-      return datePortion;
+      return false;
+    }
+
+    return parsed.year == _visibleMonth.year &&
+        parsed.month == _visibleMonth.month;
+  }
+
+  String _formatDate(Object? value) {
+    final parsed = _parseDate(value);
+    if (parsed == null) {
+      return (value ?? '').toString();
     }
 
     const months = [
@@ -1030,7 +1141,7 @@ class _WeeklyScheduleComposerState
               child: Opacity(
                 opacity: _isLocked ? 0.72 : 1,
                 child: DropdownButtonFormField<String>(
-                  value: _selectedTerm,
+                  initialValue: _selectedTerm,
                   isExpanded: true,
                   decoration: InputDecoration(
                     isDense: true,
@@ -1217,9 +1328,7 @@ class _WeeklyScheduleComposerState
           if (!mounted) {
             return;
           }
-          final message = error is ApiException
-              ? error.message
-              : error.toString();
+          final message = error?.toString() ?? 'Failed to submit';
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text(message)));

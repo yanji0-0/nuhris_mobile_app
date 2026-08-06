@@ -341,6 +341,14 @@ ref.invalidate(profilePhotoProvider);
 - Enable Row Level Security on Supabase tables before production use.
 - Validate input before sending it to the backend.
 
+## Recent Changes
+
+- Session provider updates: initialization and access checks were improved to better gate the app shell on employee access. See `lib/providers/session_provider.dart`.
+- API client tweaks: several endpoints and helper methods were updated to support the UI changes; check `lib/services/api_client.dart` before rolling to staging.
+- UI refresh flow: screens now handle loading/error states more consistently; refresh providers after write actions where appropriate.
+
+These notes reflect local changes made in the mobile client; verify API contract compatibility with the backend before deploying.
+
 ## Useful References
 
 - [lib/main.dart](lib/main.dart)

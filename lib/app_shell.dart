@@ -23,7 +23,10 @@ class AppShell extends ConsumerWidget {
     if (!session.isLoggedIn) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: SignInScreen(onSignIn: controller.signIn),
+        home: SignInScreen(
+          onSignIn: controller.signIn,
+          authUid: session.authUid,
+        ),
       );
     }
 

@@ -5,6 +5,7 @@ import 'file_viewer_screen.dart';
 import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 import '../theme/app_theme.dart';
 import 'wfh_monitoring_upload.dart';
 
@@ -268,20 +269,11 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1B66),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: const Text('WFH Monitoring'),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'WFH Monitoring',
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

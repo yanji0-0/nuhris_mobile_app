@@ -1,9 +1,16 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 
 class SignInScreen extends StatefulWidget {
-  const SignInScreen({super.key, required this.onSignIn});
+  const SignInScreen({
+    super.key,
+    required this.onSignIn,
+    this.authUid,
+  });
 
   final Future<String?> Function(String email, String password) onSignIn;
+  final String? authUid;
 
   @override
   State<SignInScreen> createState() => _SignInScreenState();
@@ -19,6 +26,33 @@ class _SignInScreenState extends State<SignInScreen> {
   bool _rememberMe = false;
   String? _loginError;
 
+  Future<void> _submitSignIn() async {
+    final email = emailCtrl.text.trim();
+    final password = passCtrl.text;
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _loginError = 'Please enter your email and password.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _loginError = null;
+    });
+
+    final error = await widget.onSignIn(email, password);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _isSubmitting = false);
+
+    if (error != null) {
+      setState(() => _loginError = _mapLoginErrorMessage(error));
+    }
+  }
+
   @override
   void dispose() {
     emailCtrl.dispose();
@@ -33,6 +67,7 @@ class _SignInScreenState extends State<SignInScreen> {
     }
 
     final normalized = raw.toLowerCase();
+
     if (normalized.contains('email and password are required')) {
       return 'Please enter your email and password.';
     }
@@ -51,17 +86,6 @@ class _SignInScreenState extends State<SignInScreen> {
         normalized.contains('invalid credentials')) {
       return 'Incorrect email or password. Please try again.';
     }
-    if (normalized.contains('network') ||
-        normalized.contains('socketexception') ||
-        normalized.contains('timed out') ||
-        normalized.contains('timeout')) {
-      return 'Network issue detected. Check your internet connection and try again.';
-    }
-    if (normalized.contains('too many requests') ||
-        normalized.contains('rate limit')) {
-      return 'Too many sign-in attempts. Please wait a moment and try again.';
-    }
-
     if (normalized.contains('employee profile not found') ||
         normalized.contains('not allowed to access')) {
       return 'Your account is valid but not linked to an employee profile yet.';
@@ -213,6 +237,31 @@ class _SignInScreenState extends State<SignInScreen> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                        if ((widget.authUid ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F7FF),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFFC7D6F5),
+                              ),
+                            ),
+                            child: Text(
+                              'Auth UID: ${widget.authUid}',
+                              style: const TextStyle(
+                                color: Color(0xFF27457A),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                         if (_loginError != null) ...[
                           const SizedBox(height: 18),
                           Container(
@@ -372,39 +421,7 @@ class _SignInScreenState extends State<SignInScreen> {
                           width: double.infinity,
                           height: 46,
                           child: ElevatedButton(
-                            onPressed: _isSubmitting
-                                ? null
-                                : () async {
-                                    final email = emailCtrl.text.trim();
-                                    final password = passCtrl.text;
-                                    if (email.isEmpty || password.isEmpty) {
-                                      setState(() {
-                                        _loginError =
-                                            'Please enter your email and password.';
-                                      });
-                                      return;
-                                    }
-
-                                    setState(() {
-                                      _isSubmitting = true;
-                                      _loginError = null;
-                                    });
-                                    final error = await widget.onSignIn(
-                                      email,
-                                      password,
-                                    );
-                                    if (!mounted) {
-                                      return;
-                                    }
-                                    setState(() => _isSubmitting = false);
-
-                                    if (error != null) {
-                                      setState(
-                                        () => _loginError =
-                                            _mapLoginErrorMessage(error),
-                                      );
-                                    }
-                                  },
+                            onPressed: _isSubmitting ? null : _submitSignIn,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF0C3F78),
                               foregroundColor: Colors.white,

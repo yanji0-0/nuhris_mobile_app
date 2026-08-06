@@ -10,12 +10,10 @@ class AppDrawer extends ConsumerWidget {
     super.key,
     required this.selected,
     required this.onSelect,
-    required this.onSignOut,
   });
 
   final AppNavItem selected;
   final ValueChanged<AppNavItem> onSelect;
-  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,34 +129,6 @@ class AppDrawer extends ConsumerWidget {
                           color: Colors.white.withValues(alpha: 0.82),
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: onSignOut,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.logout,
-                                color: Colors.white70,
-                                size: 18,
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                'Sign Out',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                     ],

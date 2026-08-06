@@ -75,18 +75,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Email and password are required.');
     }
 
+    AuthResponse authResult;
     try {
-      await _client.auth.signInWithPassword(
+      authResult = await _client.auth.signInWithPassword(
         email: normalizedEmail,
         password: password,
       );
-    } catch (_) {
+    } catch (error) {
       // Fallback to public users table login for projects not using Supabase Auth.
       final rows = await _client
           .from('users')
-          .select(
-            'id,name,email,password,user_type,must_change_password,email_verified_at',
-          )
+          .select('*')
           .ilike('email', normalizedEmail)
           .limit(1);
 
@@ -118,6 +117,15 @@ class ApiClient implements AppApiClient {
         await logout();
         throw ApiException(_loginFailedMessage);
       }
+
+      final employeeId = employee['id'];
+      if (employeeId != null) {
+        await _provisionAuthUserIfMissing(
+          email: normalizedEmail,
+          password: password,
+          employeeId: employeeId,
+        );
+      }
       return;
     }
 
@@ -134,6 +142,12 @@ class ApiClient implements AppApiClient {
     if (employee == null) {
       await logout();
       throw ApiException(_loginFailedMessage);
+    }
+
+    final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
+    final employeeId = employee['id'];
+    if (authUserId != null && authUserId.isNotEmpty && employeeId != null) {
+      await _syncEmployeeAuthId(employeeId: employeeId, authUserId: authUserId);
     }
   }
 
@@ -156,7 +170,11 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final attendanceRows = await _client
         .from('attendance_records')
         .select('status')
@@ -179,13 +197,21 @@ class ApiClient implements AppApiClient {
     );
 
     final user = await _currentUserRow();
-    final userId = user?['id'];
-    final notificationRows = userId == null
-        ? const []
-        : await _client
-              .from('announcement_notifications')
-              .select('id,is_read')
-              .eq('user_id', userId);
+    final rawUserId = user?['id'];
+    // Prefer numeric user id from the users row, but fall back to the
+    // employees.user_id mapping when available so mobile clients that only
+    // have an auth UID won't break notification reads.
+    int? numericUserId = _toIntId(rawUserId);
+    if (numericUserId == null && employee != null) {
+      numericUserId = _toIntId(employee['user_id']);
+    }
+
+    final notificationRows = numericUserId == null
+      ? const []
+      : await _client
+        .from('announcement_notifications')
+        .select('id,is_read')
+        .eq('user_id', numericUserId);
 
     final attendanceSummary = <String, int>{
       'present': 0,
@@ -348,9 +374,7 @@ class ApiClient implements AppApiClient {
 
     final compliantCredentials = credentialRows.whereType<Map>().where((row) {
       final item = row.cast<String, dynamic>();
-      return isApprovedCredential(item) &&
-          !isExpiredCredential(item) &&
-          !isExpiringSoonCredential(item);
+      return isApprovedCredential(item) && !isExpiredCredential(item);
     }).length;
 
     final nonCompliantCredentials = credentialRows.whereType<Map>().where((
@@ -407,12 +431,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
+    final numericEmployeeId = _toIntId(employee['id']);
+    if (numericEmployeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final rows = await _client
         .from('attendance_records')
         .select(
           'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status,schedule_status,schedule_notes',
         )
-        .eq('employee_id', employee['id'])
+        .eq('employee_id', numericEmployeeId)
         .order('record_date', ascending: false);
 
     return _toMapList(rows);
@@ -425,12 +454,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
+    final numericEmployeeId = _toIntId(employee['id']);
+    if (numericEmployeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final submissionRows = await _client
         .from('employee_schedule_submissions')
         .select(
           'id,employee_id,term_label,semester_label,status,submitted_at,reviewed_at,review_notes,is_current',
         )
-        .eq('employee_id', employee['id'])
+        .eq('employee_id', numericEmployeeId)
         .order('submitted_at', ascending: false)
         .limit(1);
 
@@ -484,8 +518,11 @@ class ApiClient implements AppApiClient {
       throw ApiException('At least one schedule day is required.');
     }
 
-    final employeeId = employee['id'];
-    final submittedBy = user['id'];
+    final employeeId = _toIntId(employee['id']);
+    final submittedBy = _toIntId(user['id']);
+    if (employeeId == null || submittedBy == null) {
+      throw ApiException('Employee or user profile not found.');
+    }
     final submittedAt = DateTime.now().toUtc().toIso8601String();
 
     late int submissionId;
@@ -556,7 +593,10 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
     final balances = await _client
         .from('leave_balances')
         .select(
@@ -643,13 +683,24 @@ class ApiClient implements AppApiClient {
       throw ApiException('User profile not found.');
     }
 
-    final rows = await _client
-        .from('announcement_notifications')
-        .select(
-          'id,user_id,announcement_id,is_read,read_at,created_at,announcement:announcements(*)',
-        )
-        .eq('user_id', user['id'])
-        .order('created_at', ascending: false);
+      final rawUserId = user['id'];
+      int? numericUserId = _toIntId(rawUserId);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return const [];
+      }
+
+      final rows = await _client
+          .from('announcement_notifications')
+          .select(
+            'id,user_id,announcement_id,is_read,read_at,created_at,announcement:announcements(*)',
+          )
+          .eq('user_id', numericUserId)
+          .order('created_at', ascending: false);
 
     return _toMapList(rows);
   }
@@ -662,13 +713,23 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to mark
+      }
+
       await _client
           .from('announcement_notifications')
           .update({
             'is_read': true,
             'read_at': DateTime.now().toIso8601String(),
           })
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to mark notifications read: $error');
     }
@@ -682,6 +743,16 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to mark
+      }
+
       await _client
           .from('announcement_notifications')
           .update({
@@ -689,7 +760,7 @@ class ApiClient implements AppApiClient {
             'read_at': DateTime.now().toIso8601String(),
           })
           .eq('id', notificationId)
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to mark notification read: $error');
     }
@@ -703,10 +774,20 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to clear
+      }
+
       await _client
           .from('announcement_notifications')
           .delete()
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to clear notifications: $error');
     }
@@ -739,7 +820,10 @@ class ApiClient implements AppApiClient {
         update['email'] = payload['email'];
       }
       if (update.isNotEmpty) {
-        await _client.from('users').update(update).eq('id', userId);
+        final numericUserId = _toIntId(userId);
+        if (numericUserId != null) {
+          await _client.from('users').update(update).eq('id', numericUserId);
+        }
       }
     }
 
@@ -756,10 +840,13 @@ class ApiClient implements AppApiClient {
         employeeUpdate['employment_type'] = payload['employment_type'];
       }
       if (employeeUpdate.isNotEmpty) {
-        await _client
-            .from('employees')
-            .update(employeeUpdate)
-            .eq('id', employee['id']);
+        final numericEmployeeId = _toIntId(employee['id']);
+        if (numericEmployeeId != null) {
+          await _client
+              .from('employees')
+              .update(employeeUpdate)
+              .eq('id', numericEmployeeId);
+        }
       }
     }
 
@@ -1405,7 +1492,10 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
 
     try {
       final rows = await _client
@@ -1552,10 +1642,17 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      final numericEmployeeId = _toIntId(employee['id']);
+      if (numericEmployeeId == null) {
+        throw ApiException(
+          'Employee profile not found while saving profile photo path.',
+        );
+      }
+
       await _client
           .from('employees')
           .update({'profilephoto_path': path})
-          .eq('id', employee['id']);
+          .eq('id', numericEmployeeId);
     } on PostgrestException catch (error) {
       throw ApiException(
         'Profile photo uploaded, but failed to save employees.profilephoto_path: ${error.message}',
@@ -1595,6 +1692,45 @@ class ApiClient implements AppApiClient {
     };
   }
 
+  Future<void> _provisionAuthUserIfMissing({
+    required String email,
+    required String password,
+    required dynamic employeeId,
+  }) async {
+    try {
+      final authResult = await _client.auth.signUp(
+        email: email,
+        password: password,
+      );
+
+      final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
+      if (authUserId == null || authUserId.trim().isEmpty) {
+        return;
+      }
+
+      await _syncEmployeeAuthId(
+        employeeId: employeeId,
+        authUserId: authUserId,
+      );
+    } catch (_) {
+      // If the auth account already exists or signup is disabled, keep login working.
+    }
+  }
+
+  Future<void> _syncEmployeeAuthId({
+    required dynamic employeeId,
+    required String authUserId,
+  }) async {
+    try {
+      await _client
+          .from('employees')
+          .update({'auth_id': authUserId})
+          .eq('id', employeeId);
+    } catch (_) {
+      // Keep login working even if auth_id sync fails.
+    }
+  }
+
   Future<Map<String, dynamic>?> _currentUserRow() async {
     if (_user != null) {
       return _user;
@@ -1610,11 +1746,37 @@ class ApiClient implements AppApiClient {
   }
 
   Future<Map<String, dynamic>?> _currentEmployee() async {
+    final authUserId = _client.auth.currentUser?.id.trim() ?? '';
     final user = await _currentUserRow();
     final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
         .toString()
         .trim();
     final userId = (user?['id'] ?? '').toString().trim();
+    final userEmployeeId = (user?['employee_id'] ?? '').toString().trim();
+    final userAuthId = (user?['auth_id'] ?? '').toString().trim();
+
+    final employeeIdCandidates = <String>{
+      if (userId.isNotEmpty) userId,
+      if (authUserId.isNotEmpty) authUserId,
+      if (userEmployeeId.isNotEmpty) userEmployeeId,
+      if (userAuthId.isNotEmpty) userAuthId,
+    }.toList();
+
+    Future<List<Map<String, dynamic>>> fetchByAuthId() async {
+      if (authUserId.isEmpty) {
+        return const [];
+      }
+      try {
+        final rows = await _client
+            .from('employees')
+            .select('*')
+            .eq('auth_id', authUserId)
+            .limit(1);
+        return _toMapList(rows);
+      } catch (_) {
+        return const [];
+      }
+    }
 
     Future<List<Map<String, dynamic>>> fetchByEmail() async {
       if (email.isEmpty) {
@@ -1633,14 +1795,27 @@ class ApiClient implements AppApiClient {
     }
 
     Future<List<Map<String, dynamic>>> fetchByUserId() async {
-      if (userId.isEmpty) {
+      if (employeeIdCandidates.isEmpty) {
         return const [];
       }
       try {
+        // `employees.user_id` is typically a numeric (bigint) column.
+        // Filter the candidate list to numeric values only to avoid
+        // Postgres errors like "invalid input syntax for type bigint"
+        // when auth UIDs (UUID strings) are present.
+        final numericCandidates = employeeIdCandidates
+            .where((c) => int.tryParse(c.toString().trim()) != null)
+            .map((c) => int.parse(c.toString().trim()))
+            .toList();
+
+        if (numericCandidates.isEmpty) {
+          return const [];
+        }
+
         final rows = await _client
             .from('employees')
             .select('*')
-            .eq('user_id', userId)
+            .inFilter('user_id', numericCandidates)
             .limit(1);
         return _toMapList(rows);
       } catch (_) {
@@ -1648,7 +1823,10 @@ class ApiClient implements AppApiClient {
       }
     }
 
-    var list = await fetchByEmail();
+    var list = await fetchByAuthId();
+    if (list.isEmpty) {
+      list = await fetchByEmail();
+    }
     if (list.isEmpty) {
       list = await fetchByUserId();
     }
@@ -1666,6 +1844,22 @@ class ApiClient implements AppApiClient {
       final departments = _toMapList(deptRows);
       if (departments.isNotEmpty) {
         employee['department'] = departments.first;
+      }
+    }
+
+    // If we've resolved an employee row, prefer using the employee's name
+    // as the display name for the current user when the user record lacks
+    // a friendly `name` (for example when reading from auth metadata).
+    if (_user != null) {
+      final currentUserName = (_user?['name'] ?? '').toString();
+      final userEmail = (_user?['email'] ?? '').toString();
+      if (currentUserName.isEmpty || currentUserName == userEmail) {
+        final empName = (employee['name'] ?? employee['full_name'] ?? '')
+            .toString()
+            .trim();
+        if (empName.isNotEmpty) {
+          _user!['name'] = empName;
+        }
       }
     }
 
@@ -1687,6 +1881,11 @@ class ApiClient implements AppApiClient {
       return value;
     }
     return int.tryParse(value?.toString() ?? '');
+  }
+
+  int? _toIntId(dynamic value) {
+    if (value == null) return null;
+    return int.tryParse(value.toString().trim());
   }
 
   List<dynamic> _employeeCredentialIdentifiers(Map<String, dynamic> employee) {
@@ -1722,12 +1921,22 @@ class ApiClient implements AppApiClient {
       return const [];
     }
 
+    // Ensure we only pass numeric identifiers to employee_id (bigint).
+    final numericIdentifiers = employeeIdentifiers
+        .where((c) => int.tryParse(c.toString().trim()) != null)
+        .map((c) => int.parse(c.toString().trim()))
+        .toList();
+
+    if (numericIdentifiers.isEmpty) {
+      return const [];
+    }
+
     dynamic query = _client.from('employee_credentials').select(select);
 
-    if (employeeIdentifiers.length == 1) {
-      query = query.eq('employee_id', employeeIdentifiers.first);
+    if (numericIdentifiers.length == 1) {
+      query = query.eq('employee_id', numericIdentifiers.first);
     } else {
-      query = query.inFilter('employee_id', employeeIdentifiers);
+      query = query.inFilter('employee_id', numericIdentifiers);
     }
 
     if (orderByCreatedAtDesc) {
