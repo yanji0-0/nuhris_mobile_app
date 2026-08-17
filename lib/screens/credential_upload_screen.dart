@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -231,6 +232,7 @@ class _CredentialUploadScreenState
         'file_path': uploadedFilePath,
       });
 
+      ref.read(appRefreshProvider.notifier).trigger();
       await widget.onSubmitted();
       if (!mounted) return;
       messenger.showSnackBar(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'file_viewer_screen.dart';
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
@@ -28,10 +29,12 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _submissions = [];
+  int _lastRefreshToken = -1;
 
   @override
   void initState() {
     super.initState();
+    _lastRefreshToken = ref.read(appRefreshProvider);
     _loadSubmissions();
   }
 
@@ -51,6 +54,17 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  void _syncRefreshToken(int refreshToken) {
+    if (_lastRefreshToken == refreshToken) {
+      return;
+    }
+
+    _lastRefreshToken = refreshToken;
+    _isLoading = true;
+    _error = null;
+    _loadSubmissions();
   }
 
   int get _totalCount => _submissions.length;
@@ -260,6 +274,9 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final refreshToken = ref.watch(appRefreshProvider);
+    _syncRefreshToken(refreshToken);
+
     final isMobile = MediaQuery.of(context).size.width < 600;
 
     return Scaffold(
@@ -299,30 +316,31 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                SizedBox(
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const WFHMonitoringUploadScreen(),
+                if (!isMobile)
+                  SizedBox(
+                    height: 44,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const WFHMonitoringUploadScreen(),
+                          ),
+                        ).then((_) => _loadSubmissions());
+                      },
+                      child: const Text(
+                        'Upload New',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2B2F36),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                      ).then((_) => _loadSubmissions());
-                    },
-                    child: const Text(
-                      'Upload New',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2B2F36),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 16),
                 if (!isMobile)
                   Wrap(
@@ -359,36 +377,28 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      Flexible(
-                        child: _SummaryCard(
-                          'TOTAL',
-                          _totalCount.toString(),
-                          const Color(0xFFF3F4F6),
-                        ),
+                      _SummaryCard(
+                        'TOTAL',
+                        _totalCount.toString(),
+                        const Color(0xFFF3F4F6),
                       ),
-                      Flexible(
-                        child: _SummaryCard(
-                          'PENDING',
-                          _pendingCount.toString(),
-                          const Color(0xFFFEF3C7),
-                          labelColor: const Color(0xFFB45309),
-                        ),
+                      _SummaryCard(
+                        'PENDING',
+                        _pendingCount.toString(),
+                        const Color(0xFFFEF3C7),
+                        labelColor: const Color(0xFFB45309),
                       ),
-                      Flexible(
-                        child: _SummaryCard(
-                          'APPROVED',
-                          _approvedCount.toString(),
-                          const Color(0xFFD1FAE5),
-                          labelColor: const Color(0xFF065F46),
-                        ),
+                      _SummaryCard(
+                        'APPROVED',
+                        _approvedCount.toString(),
+                        const Color(0xFFD1FAE5),
+                        labelColor: const Color(0xFF065F46),
                       ),
-                      Flexible(
-                        child: _SummaryCard(
-                          'DECLINED',
-                          _declinedCount.toString(),
-                          const Color(0xFFECF0F1),
-                          labelColor: const Color(0xFF4B5563),
-                        ),
+                      _SummaryCard(
+                        'DECLINED',
+                        _declinedCount.toString(),
+                        const Color(0xFFECF0F1),
+                        labelColor: const Color(0xFF4B5563),
                       ),
                     ],
                   ),

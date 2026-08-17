@@ -1,15 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_refresh_provider.dart';
 import 'api_client_provider.dart';
 
 final dashboardProvider =
     AsyncNotifierProvider<DashboardController, Map<String, dynamic>?>(
-  DashboardController.new,
-);
+      DashboardController.new,
+    );
 
 class DashboardController extends AsyncNotifier<Map<String, dynamic>?> {
   @override
   Future<Map<String, dynamic>?> build() async {
+    ref.watch(appRefreshProvider);
     return _load();
   }
 

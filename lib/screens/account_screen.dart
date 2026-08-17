@@ -6,11 +6,13 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../providers/account_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
+import '../utils/initials.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
   const AccountScreen({
@@ -33,7 +35,6 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isUploadingPhoto = false;
-  bool _isChangingPassword = false;
   final ImagePicker _imagePicker = ImagePicker();
   XFile? _profilePhoto;
   String? _profilePhotoUrl;
@@ -44,13 +45,6 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   final _phoneCtrl = TextEditingController();
   final _dateHiredCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  final _currentPasswordCtrl = TextEditingController();
-  final _newPasswordCtrl = TextEditingController();
-  final _confirmPasswordCtrl = TextEditingController();
-
-  bool _obscureCurrentPassword = true;
-  bool _obscureNewPassword = true;
-  bool _obscureConfirmPassword = true;
   ProviderSubscription<AsyncValue<Map<String, dynamic>>>? _accountSubscription;
   ProviderSubscription<AsyncValue<String?>>? _profilePhotoSubscription;
 
@@ -79,12 +73,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             final firstName = (employee['first_name'] ?? '').toString().trim();
             final lastName = (employee['last_name'] ?? '').toString().trim();
             final empCombined = (lastName.isNotEmpty && firstName.isNotEmpty)
-              ? '${lastName}, ${firstName}'
-              : ((employee['name'] ?? '').toString().trim());
+                ? '${lastName}, ${firstName}'
+                : ((employee['name'] ?? '').toString().trim());
 
             _displayName = empCombined.isNotEmpty
-              ? empCombined
-              : (user['name'] ?? 'Employee').toString();
+                ? empCombined
+                : (user['name'] ?? 'Employee').toString();
             _displayEmail = (user['email'] ?? '').toString();
 
             _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
@@ -137,9 +131,6 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     _phoneCtrl.dispose();
     _dateHiredCtrl.dispose();
     _addressCtrl.dispose();
-    _currentPasswordCtrl.dispose();
-    _newPasswordCtrl.dispose();
-    _confirmPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -158,7 +149,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     _dateHiredCtrl.text =
         '${picked.month.toString().padLeft(2, '0')}/${picked.day.toString().padLeft(2, '0')}/${picked.year}';
   }
-
+// ignore: unused_element
+  // ignore: unused_element
   void _showImageDialog() {
     showDialog<void>(
       context: context,
@@ -296,6 +288,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         _profilePhotoUrl = resolvedUrl.isEmpty ? _profilePhotoUrl : resolvedUrl;
       });
 
+      ref.read(appRefreshProvider.notifier).trigger();
+
       messenger.showSnackBar(
         const SnackBar(content: Text('Profile photo updated.')),
       );
@@ -304,10 +298,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         return;
       }
 
-        final message = error.toString();
+      final message = error.toString();
 
       messenger.showSnackBar(
-          SnackBar(content: Text('Photo upload failed: $message')),
+        SnackBar(content: Text('Photo upload failed: $message')),
       );
     } finally {
       if (mounted) {
@@ -356,70 +350,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     return null;
   }
 
-  Future<void> _handleChangePassword() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final currentPassword = _currentPasswordCtrl.text;
-    final newPassword = _newPasswordCtrl.text;
-    final confirmPassword = _confirmPasswordCtrl.text;
 
-    if (currentPassword.trim().isEmpty ||
-        newPassword.trim().isEmpty ||
-        confirmPassword.trim().isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Please complete all password fields.')),
-      );
-      return;
-    }
-
-    if (newPassword.trim().length < 6) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('New password must be at least 6 characters long.'),
-        ),
-      );
-      return;
-    }
-
-    if (newPassword != confirmPassword) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('New password and confirm password do not match.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isChangingPassword = true);
-    try {
-      final api = ref.read(apiClientProvider);
-      await api.changePassword(
-        currentPassword: currentPassword,
-        newPassword: newPassword,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      _currentPasswordCtrl.clear();
-      _newPasswordCtrl.clear();
-      _confirmPasswordCtrl.clear();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Password changed successfully.')),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      messenger.showSnackBar(
-        SnackBar(content: Text('Change password failed: $error')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isChangingPassword = false);
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -470,52 +401,23 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   offset: const Offset(0, -28),
                   child: Column(
                     children: [
-                      GestureDetector(
-                        onTap: _showImageDialog,
-                        child: Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 34,
-                              backgroundColor: Colors.white,
-                              child: CircleAvatar(
-                                radius: 31,
-                                backgroundColor: const Color(0xFFE9EEF3),
-                                backgroundImage: avatarImage,
-                                child: avatarImage == null
-                                    ? const Icon(
-                                        Icons.person,
-                                        size: 38,
-                                        color: Color(0xFF7B8794),
-                                      )
-                                    : null,
-                              ),
-                            ),
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: AppColors.primaryBlue,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: _isUploadingPhoto
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.camera_alt,
-                                        size: 14,
-                                        color: Colors.white,
-                                      ),
-                              ),
-                            ),
-                          ],
+                      CircleAvatar(
+                        radius: 34,
+                        backgroundColor: Colors.white,
+                        child: CircleAvatar(
+                          radius: 31,
+                          backgroundColor: const Color(0xFFE9EEF3),
+                          backgroundImage: avatarImage,
+                          child: avatarImage == null
+                              ? Text(
+                                  twoLetterInitials(displayName: _displayName),
+                                  style: const TextStyle(
+                                    color: Color(0xFF7B8794),
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 28,
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -634,6 +536,9 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                                     'phone': _phoneCtrl.text.trim(),
                                     'address': _addressCtrl.text.trim(),
                                   });
+                                  ref
+                                      .read(appRefreshProvider.notifier)
+                                      .trigger();
                                   if (mounted) {
                                     messenger.showSnackBar(
                                       const SnackBar(
@@ -686,135 +591,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Change Password',
-                    style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Update your account password. Use your current password before setting a new one.',
-                    style: TextStyle(color: AppColors.mutedText, fontSize: 13),
-                  ),
-                  const SizedBox(height: 14),
-                  const _FieldLabel('Current Password'),
-                  TextField(
-                    controller: _currentPasswordCtrl,
-                    obscureText: _obscureCurrentPassword,
-                    decoration:
-                        _inputDecoration(
-                          hintText: 'Enter current password',
-                        ).copyWith(
-                          suffixIcon: IconButton(
-                            onPressed: () {
-                              setState(
-                                () => _obscureCurrentPassword =
-                                    !_obscureCurrentPassword,
-                              );
-                            },
-                            icon: Icon(
-                              _obscureCurrentPassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('New Password'),
-                  TextField(
-                    controller: _newPasswordCtrl,
-                    obscureText: _obscureNewPassword,
-                    decoration: _inputDecoration(hintText: 'Min 6 characters')
-                        .copyWith(
-                          suffixIcon: IconButton(
-                            onPressed: () {
-                              setState(
-                                () =>
-                                    _obscureNewPassword = !_obscureNewPassword,
-                              );
-                            },
-                            icon: Icon(
-                              _obscureNewPassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Confirm New Password'),
-                  TextField(
-                    controller: _confirmPasswordCtrl,
-                    obscureText: _obscureConfirmPassword,
-                    decoration:
-                        _inputDecoration(
-                          hintText: 'Re-enter new password',
-                        ).copyWith(
-                          suffixIcon: IconButton(
-                            onPressed: () {
-                              setState(
-                                () => _obscureConfirmPassword =
-                                    !_obscureConfirmPassword,
-                              );
-                            },
-                            icon: Icon(
-                              _obscureConfirmPassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      height: 40,
-                      child: ElevatedButton.icon(
-                        onPressed: _isChangingPassword
-                            ? null
-                            : _handleChangePassword,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF014A8D),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                        ),
-                        icon: _isChangingPassword
-                            ? const SizedBox(
-                                height: 16,
-                                width: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.lock_reset, size: 18),
-                        label: Text(
-                          _isChangingPassword
-                              ? 'Changing...'
-                              : 'Change Password',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+
         ],
       ),
     );

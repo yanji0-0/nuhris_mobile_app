@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
@@ -24,15 +25,33 @@ class LeaveMonitoringScreen extends ConsumerStatefulWidget {
 
 class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
   late Future<Map<String, dynamic>> _future;
+  int _lastRefreshToken = -1;
 
   @override
   void initState() {
     super.initState();
-    _future = ref.read(apiClientProvider).getLeaveMonitoring();
+    _lastRefreshToken = ref.read(appRefreshProvider);
+    _future = _loadLeaveMonitoring();
+  }
+
+  Future<Map<String, dynamic>> _loadLeaveMonitoring() {
+    return ref.read(apiClientProvider).getLeaveMonitoring();
+  }
+
+  void _syncRefreshToken(int refreshToken) {
+    if (_lastRefreshToken == refreshToken) {
+      return;
+    }
+
+    _lastRefreshToken = refreshToken;
+    _future = _loadLeaveMonitoring();
   }
 
   @override
   Widget build(BuildContext context) {
+    final refreshToken = ref.watch(appRefreshProvider);
+    _syncRefreshToken(refreshToken);
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.leaveMonitoring,
@@ -1074,4 +1093,3 @@ class _FooterNote extends StatelessWidget {
     );
   }
 }
-

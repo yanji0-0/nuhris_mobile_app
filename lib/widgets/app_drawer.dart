@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
 import '../theme/app_theme.dart';
+import '../utils/initials.dart';
 import '../providers/account_provider.dart';
 
 class AppDrawer extends ConsumerWidget {
@@ -22,23 +23,13 @@ class AppDrawer extends ConsumerWidget {
 
     return accountAsync.when(
       data: (account) {
-        final user =
-            (account['user'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
-        final employee =
-            (account['employee'] as Map?)?.cast<String, dynamic>() ??
-            const <String, dynamic>{};
+        final user = (account['user'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+        final employee = (account['employee'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
 
         final firstName = (employee['first_name'] ?? '').toString().trim();
         final lastName = (employee['last_name'] ?? '').toString().trim();
-        final fullName = [
-          lastName,
-          firstName,
-        ].where((part) => part.isNotEmpty).join(', ');
-        final displayName = fullName.isNotEmpty
-            ? fullName
-            : (user['name'] ?? 'Employee').toString();
-
+        final fullName = [lastName, firstName].where((part) => part.isNotEmpty).join(', ');
+        final displayName = fullName.isNotEmpty ? fullName : (user['name'] ?? 'Employee').toString();
         final email = (employee['email'] ?? user['email'] ?? '').toString();
 
         return Drawer(
@@ -255,16 +246,20 @@ class _Header extends StatelessWidget {
               children: [
                 profilePhotoAsync.when(
                   data: (photoUrl) {
-                    final hasPhoto =
-                        photoUrl != null && photoUrl.trim().isNotEmpty;
+                    final hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
                     return CircleAvatar(
                       radius: 16,
                       backgroundColor: AppColors.nuhrisYellow,
-                      backgroundImage: hasPhoto
-                          ? NetworkImage(photoUrl.trim())
-                          : null,
+                      backgroundImage: hasPhoto ? NetworkImage(photoUrl.trim()) : null,
                       child: !hasPhoto
-                          ? Icon(Icons.person, color: AppColors.navy, size: 18)
+                          ? Text(
+                              twoLetterInitials(displayName: displayName),
+                              style: const TextStyle(
+                                color: Color(0xFF0A1B66),
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                              ),
+                            )
                           : null,
                     );
                   },
@@ -276,7 +271,14 @@ class _Header extends StatelessWidget {
                   error: (_, __) => CircleAvatar(
                     radius: 16,
                     backgroundColor: AppColors.nuhrisYellow,
-                    child: Icon(Icons.person, color: AppColors.navy, size: 18),
+                    child: Text(
+                      twoLetterInitials(displayName: displayName),
+                      style: const TextStyle(
+                        color: AppColors.navy,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -340,9 +342,7 @@ class _DrawerItem extends StatelessWidget {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(16),
-            border: selected
-                ? null
-                : Border.all(color: Colors.transparent, width: 1),
+            border: selected ? null : Border.all(color: Colors.transparent, width: 1),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
@@ -360,8 +360,7 @@ class _DrawerItem extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (selected)
-                  const Icon(Icons.circle, size: 9, color: Color(0xFF041D6D)),
+                if (selected) const Icon(Icons.circle, size: 9, color: Color(0xFF041D6D)),
               ],
             ),
           ),

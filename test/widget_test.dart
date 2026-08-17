@@ -100,6 +100,9 @@ class FakeApiClient implements AppApiClient {
     required dynamic id,
     String? filePath,
   }) async {}
+
+  @override
+  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() async => null;
 }
 
 void main() {

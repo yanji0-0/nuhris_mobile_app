@@ -1,4 +1,5 @@
 import 'package:bcrypt/bcrypt.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -196,22 +197,7 @@ class ApiClient implements AppApiClient {
       employeeIdentifiers: credentialIdentifiers,
     );
 
-    final user = await _currentUserRow();
-    final rawUserId = user?['id'];
-    // Prefer numeric user id from the users row, but fall back to the
-    // employees.user_id mapping when available so mobile clients that only
-    // have an auth UID won't break notification reads.
-    int? numericUserId = _toIntId(rawUserId);
-    if (numericUserId == null && employee != null) {
-      numericUserId = _toIntId(employee['user_id']);
-    }
-
-    final notificationRows = numericUserId == null
-      ? const []
-      : await _client
-        .from('announcement_notifications')
-        .select('id,is_read')
-        .eq('user_id', numericUserId);
+    final notificationItems = await getNotifications();
 
     final attendanceSummary = <String, int>{
       'present': 0,
@@ -384,10 +370,9 @@ class ApiClient implements AppApiClient {
       return !isApprovedCredential(item) || isExpiredCredential(item);
     }).length;
 
-    final unreadNotifications = notificationRows
-        .whereType<Map>()
-        .where((row) => row['is_read'] != true)
-        .length;
+    final unreadNotifications = notificationItems
+      .where((row) => row['isRead'] != true)
+      .length;
 
     final totalLeaveDays = leaveBalances.whereType<Map>().fold<double>(0, (
       sum,
@@ -418,7 +403,7 @@ class ApiClient implements AppApiClient {
         'compliant_count': compliantCredentials,
       },
       'notifications_summary': {
-        'total_count': notificationRows.length,
+        'total_count': notificationItems.length,
         'unread_count': unreadNotifications,
       },
     };
@@ -683,26 +668,242 @@ class ApiClient implements AppApiClient {
       throw ApiException('User profile not found.');
     }
 
-      final rawUserId = user['id'];
-      int? numericUserId = _toIntId(rawUserId);
-      if (numericUserId == null) {
-        final employee = await _currentEmployee();
-        numericUserId = _toIntId(employee?['user_id']);
-      }
+    final employee = await _currentEmployee();
 
-      if (numericUserId == null) {
+    final notificationUserIds = <int>{};
+
+    final currentUserId = _toIntId(user['id']);
+    if (currentUserId != null) {
+      notificationUserIds.add(currentUserId);
+    }
+
+    final employeeUserId = _toIntId(employee?['user_id']);
+    if (employeeUserId != null) {
+      notificationUserIds.add(employeeUserId);
+    }
+
+    if (notificationUserIds.isEmpty) {
+      debugPrint('🔔 Notifications: no user IDs resolved.');
+      return const [];
+    }
+
+    debugPrint(
+      '🔔 Notifications: loading for user IDs ${notificationUserIds.toList()}',
+    );
+
+    try {
+      // ============================================================
+      // STEP 1: Load notification rows first.
+      // ============================================================
+      final notificationRows = await _client
+          .from('announcement_notifications')
+          .select(
+            'id,user_id,announcement_id,is_read,read_at,created_at,updated_at,redirect_url',
+          )
+          .inFilter('user_id', notificationUserIds.toList())
+          .order('created_at', ascending: false);
+
+      final notifications = _toMapList(notificationRows);
+
+      debugPrint(
+        '📥 Notification rows loaded: ${notifications.length}',
+      );
+
+      debugPrint('🔔 ===== NOTIFICATION ROWS =====');
+      for (final notification in notifications) {
+        debugPrint(
+          '🔔 ID: ${notification['id']} | '
+          'USER: ${notification['user_id']} | '
+          'ANNOUNCEMENT: ${notification['announcement_id']} | '
+          'READ: ${notification['is_read']} | '
+          'CREATED: ${notification['created_at']}',
+        );
+      }
+      debugPrint('🔔 =============================');
+
+      if (notifications.isEmpty) {
+        debugPrint('📭 No notification rows found.');
         return const [];
       }
 
-      final rows = await _client
-          .from('announcement_notifications')
-          .select(
-            'id,user_id,announcement_id,is_read,read_at,created_at,announcement:announcements(*)',
-          )
-          .eq('user_id', numericUserId)
-          .order('created_at', ascending: false);
+      // ============================================================
+      // STEP 2: Collect announcement IDs.
+      // ============================================================
+      final announcementIds = <int>{};
 
-    return _toMapList(rows);
+      for (final notification in notifications) {
+        final announcementId = _toIntId(notification['announcement_id']);
+        if (announcementId != null) {
+          announcementIds.add(announcementId);
+        }
+      }
+
+      debugPrint(
+        '📢 Announcement IDs found: ${announcementIds.toList()}',
+      );
+
+      if (announcementIds.isEmpty) {
+        return notifications;
+      }
+
+      // ============================================================
+      // STEP 3: Load announcements separately.
+      // ============================================================
+      final announcementRows = await _client
+          .from('announcements')
+          .select(
+            'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
+          )
+          .inFilter('id', announcementIds.toList());
+
+      final announcements = _toMapList(announcementRows);
+
+      debugPrint(
+        '📢 Announcements loaded: ${announcements.length}',
+      );
+
+      debugPrint('📢 ===== ANNOUNCEMENT ROWS =====');
+      for (final announcement in announcements) {
+        debugPrint(
+          '📢 ID: ${announcement['id']} | '
+          'TITLE: ${announcement['title']} | '
+          'PUBLISHED: ${announcement['is_published']} | '
+          'DELETED: ${announcement['deleted_at']} | '
+          'EXPIRES: ${announcement['expires_at']}',
+        );
+      }
+      debugPrint('📢 =============================');
+
+      final announcementMap = <int, Map<String, dynamic>>{};
+
+      for (final announcement in announcements) {
+        final id = _toIntId(announcement['id']);
+        if (id != null) {
+          announcementMap[id] = announcement;
+        }
+      }
+
+      // ============================================================
+      // STEP 4: Attach announcements to notifications.
+      // ============================================================
+      final results = <Map<String, dynamic>>[];
+
+      for (final notification in notifications) {
+        final notificationId = _toIntId(notification['id']);
+        final announcementId = _toIntId(notification['announcement_id']);
+
+        debugPrint(
+          '🔍 Processing notification $notificationId '
+          '→ announcement $announcementId',
+        );
+
+        if (announcementId == null) {
+          debugPrint(
+            '⚠️ Notification $notificationId has no announcement_id.',
+          );
+          final item = Map<String, dynamic>.from(notification);
+          item['announcement'] = <String, dynamic>{
+            'title': 'Announcement',
+            'content': '',
+            'priority': 'medium',
+          };
+          results.add(item);
+          continue;
+        }
+
+        Map<String, dynamic>? announcement = announcementMap[announcementId];
+
+        // Fallback: if the bulk query did not return the announcement,
+        // try fetching that exact announcement by ID.
+        if (announcement == null) {
+          debugPrint(
+            '⚠️ Announcement $announcementId was not returned by bulk query. '
+            'Trying direct lookup...',
+          );
+
+          try {
+            final fallbackRows = await _client
+                .from('announcements')
+                .select(
+                  'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
+                )
+                .eq('id', announcementId)
+                .limit(1);
+
+            final fallbackList = _toMapList(fallbackRows);
+
+            if (fallbackList.isNotEmpty) {
+              announcement = fallbackList.first;
+              debugPrint(
+                '✅ Direct lookup found announcement $announcementId: '
+                '${announcement['title']}',
+              );
+            }
+          } catch (error) {
+            debugPrint(
+              '❌ Direct announcement lookup failed for $announcementId: $error',
+            );
+          }
+        }
+
+        if (announcement == null) {
+          debugPrint(
+            '❌ Announcement $announcementId does not exist or is not readable. '
+            'Using fallback announcement payload.',
+          );
+        }
+
+        // announcement_notifications is the source of truth that the user
+        // received a notification, even if announcement metadata is unreadable.
+        final item = Map<String, dynamic>.from(notification);
+        item['announcement'] = announcement != null
+            ? Map<String, dynamic>.from(announcement)
+            : <String, dynamic>{
+                'title': 'Announcement',
+                'content': '',
+                'priority': 'medium',
+              };
+        results.add(item);
+
+        debugPrint(
+          '✅ ADDED notification $notificationId '
+          '→ announcement $announcementId '
+          '→ "${item['announcement']?['title']}"',
+        );
+      }
+
+      debugPrint(
+        '🎉 Notifications returned to Flutter: ${results.length}',
+      );
+
+      debugPrint('📋 ===== FINAL NOTIFICATIONS =====');
+      for (final item in results) {
+        debugPrint(
+          '📋 Notification ${item['id']} → '
+          'User ${item['user_id']} → '
+          'Announcement ${item['announcement_id']} → '
+          '${item['announcement']?['title']} → '
+          'Read: ${item['is_read']}',
+        );
+      }
+      debugPrint('📋 ================================');
+
+      return results;
+    } on PostgrestException catch (error) {
+      debugPrint(
+        '❌ Notification query failed: ${error.message} (${error.code})',
+      );
+      throw ApiException(
+        'Failed to load notifications: ${error.message}',
+      );
+    } catch (error) {
+      debugPrint(
+        '❌ Failed to load notifications: $error',
+      );
+      throw ApiException(
+        'Failed to load notifications: $error',
+      );
+    }
   }
 
   @override
@@ -1019,127 +1220,6 @@ class ApiClient implements AppApiClient {
     }
 
     return null;
-  }
-
-  @override
-  Future<void> changePassword({
-    required String currentPassword,
-    required String newPassword,
-  }) async {
-    final current = currentPassword.trim();
-    final next = newPassword.trim();
-
-    if (current.isEmpty || next.isEmpty) {
-      throw ApiException('Current and new passwords are required.');
-    }
-
-    if (next.length < 6) {
-      throw ApiException('New password must be at least 6 characters long.');
-    }
-
-    final user = await _currentUserRow();
-    final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
-        .toString()
-        .trim();
-    if (email.isEmpty) {
-      throw ApiException(
-        'Unable to resolve account email for password change.',
-      );
-    }
-
-    if (_client.auth.currentSession != null) {
-      try {
-        await _client.auth.signInWithPassword(email: email, password: current);
-      } catch (_) {
-        throw ApiException('Current password is incorrect.');
-      }
-
-      try {
-        await _client.auth.updateUser(UserAttributes(password: next));
-      } on AuthException catch (error) {
-        throw ApiException('Password update failed: ${error.message}');
-      }
-
-      // Keep legacy/fallback users-table login in sync with Supabase Auth.
-      final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
-      await _syncUsersPasswordHash(
-        email: email,
-        hashedPassword: hashedPassword,
-        fallbackUserId: user?['id'],
-      );
-      return;
-    }
-
-    if (!_fallbackAuthenticated) {
-      throw ApiException('You are not signed in. Please sign in again.');
-    }
-
-    final rows = await _client
-        .from('users')
-        .select('id,password,must_change_password')
-        .ilike('email', email)
-        .limit(1);
-
-    if (rows.isEmpty) {
-      throw ApiException('Account record not found for password change.');
-    }
-
-    final row = (rows.first as Map).cast<String, dynamic>();
-    final storedPassword = (row['password'] ?? '').toString();
-    final isBcrypt = storedPassword.startsWith(r'$2');
-    final isValid = isBcrypt
-        ? BCrypt.checkpw(current, storedPassword)
-        : current == storedPassword;
-
-    if (!isValid) {
-      throw ApiException('Current password is incorrect.');
-    }
-
-    final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
-    await _client
-        .from('users')
-        .update({'password': hashedPassword, 'must_change_password': false})
-        .eq('id', row['id']);
-
-    await _loadCurrentUserFromTable(email);
-  }
-
-  Future<void> _syncUsersPasswordHash({
-    required String email,
-    required String hashedPassword,
-    dynamic fallbackUserId,
-  }) async {
-    final payload = {'password': hashedPassword, 'must_change_password': false};
-
-    try {
-      final byEmail = await _client
-          .from('users')
-          .update(payload)
-          .ilike('email', email)
-          .select('id');
-      if (_toMapList(byEmail).isNotEmpty) {
-        await _loadCurrentUserFromTable(email);
-        return;
-      }
-    } catch (_) {
-      // Fall back to ID update below.
-    }
-
-    if (fallbackUserId != null) {
-      final byId = await _client
-          .from('users')
-          .update(payload)
-          .eq('id', fallbackUserId)
-          .select('id');
-      if (_toMapList(byId).isNotEmpty) {
-        await _loadCurrentUserFromTable(email);
-        return;
-      }
-    }
-
-    throw ApiException(
-      'Password changed in Auth, but failed to sync users-table password record.',
-    );
   }
 
   @override
@@ -1945,6 +2025,7 @@ class ApiClient implements AppApiClient {
 
     return query;
   }
+
 }
 
 class ApiException implements Exception {

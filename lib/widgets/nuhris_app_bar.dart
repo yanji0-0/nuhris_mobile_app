@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../navigation/app_nav.dart';
 import '../providers/account_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/initials.dart';
 
 class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
   const NuhrisAppBar({
@@ -118,10 +119,17 @@ class _ProfileMenuButton extends ConsumerWidget {
                             ? NetworkImage(photoUrl.trim())
                             : null,
                         child: !hasPhoto
-                            ? Icon(
-                                Icons.person,
-                                color: AppColors.navy,
-                                size: 22,
+                            ? Text(
+                                twoLetterInitials(
+                                  firstName: firstName,
+                                  lastName: lastName,
+                                  displayName: displayName,
+                                ),
+                                style: const TextStyle(
+                                  color: AppColors.navy,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 14,
+                                ),
                               )
                             : null,
                       );
@@ -134,10 +142,17 @@ class _ProfileMenuButton extends ConsumerWidget {
                     error: (_, __) => CircleAvatar(
                       radius: 20,
                       backgroundColor: AppColors.nuhrisYellow,
-                      child: Icon(
-                        Icons.person,
-                        color: AppColors.navy,
-                        size: 22,
+                      child: Text(
+                        twoLetterInitials(
+                          firstName: firstName,
+                          lastName: lastName,
+                          displayName: displayName,
+                        ),
+                        style: const TextStyle(
+                          color: AppColors.navy,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ),
@@ -202,7 +217,20 @@ class _ProfileMenuButton extends ConsumerWidget {
           border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
         ),
         alignment: Alignment.center,
-        child: Icon(Icons.person_outline_rounded, color: foregroundColor),
+        child: FutureBuilder<Map<String, dynamic>>(
+          future: ref.read(accountProvider.future),
+          builder: (context, snap) {
+            final account = snap.data ?? const <String, dynamic>{};
+            final employee = (account['employee'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+            final firstName = (employee['first_name'] ?? '').toString().trim();
+            final lastName = (employee['last_name'] ?? '').toString().trim();
+            final displayName = [lastName, firstName].where((p) => p.isNotEmpty).join(', ');
+            return Text(
+              twoLetterInitials(firstName: firstName, lastName: lastName, displayName: displayName),
+              style: TextStyle(color: foregroundColor, fontWeight: FontWeight.w900),
+            );
+          },
+        ),
       ),
     );
   }

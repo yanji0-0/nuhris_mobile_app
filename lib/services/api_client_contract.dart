@@ -15,10 +15,6 @@ abstract class AppApiClient {
   Future<Map<String, dynamic>> uploadProfilePhoto({required String filePath});
 
   // Account management
-  Future<void> changePassword({
-    required String currentPassword,
-    required String newPassword,
-  });
   Future<void> updateAccount(Map<String, dynamic> updates);
 
   // Notifications helpers

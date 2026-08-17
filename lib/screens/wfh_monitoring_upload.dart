@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -110,6 +111,7 @@ class _WFHMonitoringUploadScreenState
           filePath: filePathString,
         );
 
+        ref.read(appRefreshProvider.notifier).trigger();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('WFH monitoring uploaded.')),

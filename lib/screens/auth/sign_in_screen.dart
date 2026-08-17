@@ -1,5 +1,4 @@
-import 'dart:developer' as developer;
-
+import 'package:flutter/material.dart';
 import 'package:flutter/material.dart';
 
 class SignInScreen extends StatefulWidget {
@@ -237,31 +236,6 @@ class _SignInScreenState extends State<SignInScreen> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        if ((widget.authUid ?? '').trim().isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF3F7FF),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: const Color(0xFFC7D6F5),
-                              ),
-                            ),
-                            child: Text(
-                              'Auth UID: ${widget.authUid}',
-                              style: const TextStyle(
-                                color: Color(0xFF27457A),
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
                         if (_loginError != null) ...[
                           const SizedBox(height: 18),
                           Container(

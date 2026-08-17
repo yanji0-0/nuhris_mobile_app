@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
@@ -27,17 +28,35 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
   late Future<List<Map<String, dynamic>>> _future;
   late DateTime _visibleMonth;
   bool _didSyncVisibleMonth = false;
+  int _lastRefreshToken = -1;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _visibleMonth = DateTime(now.year, now.month, 1);
-    _future = ref.read(apiClientProvider).getAttendanceDtr();
+    _lastRefreshToken = ref.read(appRefreshProvider);
+    _future = _loadAttendanceDtr();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadAttendanceDtr() {
+    return ref.read(apiClientProvider).getAttendanceDtr();
+  }
+
+  void _syncRefreshToken(int refreshToken) {
+    if (_lastRefreshToken == refreshToken) {
+      return;
+    }
+
+    _lastRefreshToken = refreshToken;
+    _future = _loadAttendanceDtr();
   }
 
   @override
   Widget build(BuildContext context) {
+    final refreshToken = ref.watch(appRefreshProvider);
+    _syncRefreshToken(refreshToken);
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.attendanceDtr,
@@ -116,12 +135,12 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
 
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  final showMobileSchedule = constraints.maxWidth < 700;
+                  final showWeeklySchedule = constraints.maxWidth >= 700;
                   final isCompact = constraints.maxWidth < 980;
 
                   return Column(
                     children: [
-                      if (showMobileSchedule) ...[
+                      if (showWeeklySchedule) ...[
                         const _WeeklyScheduleComposer(),
                         const SizedBox(height: 18),
                       ],
@@ -163,9 +182,9 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      DateFormat('MMMM yyyy').format(
-                                        _visibleMonth,
-                                      ),
+                                      DateFormat(
+                                        'MMMM yyyy',
+                                      ).format(_visibleMonth),
                                       style: const TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.w800,
@@ -990,6 +1009,8 @@ class _WeeklyScheduleComposerState
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
     return Card(
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -1210,41 +1231,42 @@ class _WeeklyScheduleComposerState
               ),
             ),
             const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: (_isSubmitting || _isLocked) ? null : _reset,
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF475569),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
+            if (!isMobile)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: (_isSubmitting || _isLocked) ? null : _reset,
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF475569),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: (_isSubmitting || _isLocked) ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF00386f),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: Text(
+                      _isLocked
+                          ? 'Locked'
+                          : _isSubmitting
+                          ? 'Submitting...'
+                          : 'Submit Schedule to HR',
                     ),
                   ),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 10),
-                FilledButton(
-                  onPressed: (_isSubmitting || _isLocked) ? null : _submit,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF00386f),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                  child: Text(
-                    _isLocked
-                        ? 'Locked'
-                        : _isSubmitting
-                        ? 'Submitting...'
-                        : 'Submit Schedule to HR',
-                  ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),
