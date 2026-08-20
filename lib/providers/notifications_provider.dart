@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/api_client.dart';
+import 'app_refresh_provider.dart';
 
 class NotificationItem {
   final int id;
@@ -409,6 +410,7 @@ Future<void> _subscribeToRealtime() async {
       );
 
       await _load();
+      ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
       debugPrint(
         '❌ Failed to mark notification as read: '
@@ -429,6 +431,7 @@ Future<void> _subscribeToRealtime() async {
           .markAllNotificationsRead();
 
       await _load();
+      ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
       debugPrint(
         '❌ Failed to mark all notifications as read: '
@@ -449,6 +452,7 @@ Future<void> _subscribeToRealtime() async {
           .clearAllNotifications();
 
       await _load();
+      ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
       debugPrint(
         '❌ Failed to clear notifications: '

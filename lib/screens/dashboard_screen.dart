@@ -103,9 +103,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final credentialsSummary =
         (dashboard['credentials_summary'] as Map?)?.cast<String, dynamic>() ??
         {};
-    final notificationsSummary =
-        (dashboard['notifications_summary'] as Map?)?.cast<String, dynamic>() ??
-        {};
 
     final activeCredentialsCount =
         (credentialsSummary['active_count'] ?? 0) as num;
@@ -122,9 +119,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         (credentialsSummary['total_count'] ?? 0) as num;
     final totalLeaveDays = ((leaveSummary['total_days_remaining'] ?? 0) as num)
         .toDouble();
-    final totalNotifications =
-      (notificationsSummary['unread_count'] ?? unreadNotifications.length)
-        as num;
+    // Unread only: derived from notification records where is_read != true.
+    final unreadCount = unreadNotifications.length;
 
     final firstName = (employee['first_name'] ?? '').toString().trim();
     final lastName = (employee['last_name'] ?? '').toString().trim();
@@ -157,7 +153,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
       _MetricData(
         title: 'Notifications',
-        value: totalNotifications.toInt().toString(),
+        value: unreadCount.toString(),
         subtitle: 'Recent alerts',
       ),
     ];

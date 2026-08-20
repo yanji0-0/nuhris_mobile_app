@@ -184,8 +184,9 @@ class NotificationsScreen extends ConsumerWidget {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: _NotificationCard(
+                              key: ValueKey(item.id),
                               item: item,
-                              onTap: () async {
+                              onOpened: () async {
                                 if (!item.isRead) {
                                   await controller.markNotificationRead(
                                     item.id.toString(),
@@ -208,11 +209,22 @@ class NotificationsScreen extends ConsumerWidget {
   }
 }
 
-class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.item, required this.onTap});
+class _NotificationCard extends StatefulWidget {
+  const _NotificationCard({
+    super.key,
+    required this.item,
+    required this.onOpened,
+  });
 
   final NotificationItem item;
-  final VoidCallback onTap;
+  final VoidCallback onOpened;
+
+  @override
+  State<_NotificationCard> createState() => _NotificationCardState();
+}
+
+class _NotificationCardState extends State<_NotificationCard> {
+  bool _expanded = false;
 
   Color _getIconBackground(String priority) {
     switch (priority.toLowerCase()) {
@@ -236,146 +248,198 @@ class _NotificationCard extends StatelessWidget {
     }
   }
 
+  void _handleTap() {
+    final wasExpanded = _expanded;
+    setState(() {
+      _expanded = !_expanded;
+    });
+
+    // Preserve existing unread → read behavior on tap/open.
+    if (!wasExpanded) {
+      widget.onOpened();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
+    final isRead = item.isRead;
+    final titleColor =
+        isRead ? const Color(0xFF7A8699) : const Color(0xFF141B2E);
+    final messageColor =
+        isRead ? const Color(0xFF9AA6B8) : const Color(0xFF2A324A);
+    final dateColor =
+        isRead ? const Color(0xFFA3AEBF) : const Color(0xFF4C5A73);
+    final iconBg = isRead
+        ? const Color(0xFFE8ECF2)
+        : _getIconBackground(item.priority);
+    final iconColor =
+        isRead ? const Color(0xFF9AA6B8) : _getIconColor(item.priority);
+    final chevronColor =
+        isRead ? const Color(0xFFB0B9C8) : const Color(0xFF8A95A8);
+
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Container(
-        margin: EdgeInsets.zero,
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE6ECF6)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x0B0B1E43),
-              blurRadius: 14,
-              offset: Offset(0, 6),
+      onTap: _handleTap,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+        alignment: Alignment.topCenter,
+        child: Container(
+          margin: EdgeInsets.zero,
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: isRead ? const Color(0xFFF3F5F9) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isRead ? const Color(0xFFDCE3EE) : const Color(0xFFE6ECF6),
             ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _getIconBackground(item.priority),
-                shape: BoxShape.circle,
+            boxShadow: isRead
+                ? const []
+                : const [
+                    BoxShadow(
+                      color: Color(0x0B0B1E43),
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  item.icon,
+                  color: iconColor,
+                  size: 18,
+                ),
               ),
-              child: Icon(
-                item.icon,
-                color: _getIconColor(item.priority),
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: const Color(0xFF141B2E),
-                            fontSize: 16,
-                            fontWeight:
-                                item.isRead ? FontWeight.w700 : FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (!item.isRead)
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE1F0FF),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'UNREAD',
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            maxLines: _expanded ? null : 1,
+                            overflow: _expanded
+                                ? TextOverflow.visible
+                                : TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: Color(0xFF2673EC),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              color: titleColor,
+                              fontSize: 16,
+                              height: 1.3,
+                              fontWeight:
+                                  isRead ? FontWeight.w600 : FontWeight.w800,
                             ),
                           ),
                         ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: item.priorityColor,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          item.priority.toUpperCase(),
-                          style: TextStyle(
-                            color: item.priorityTextColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+                        const SizedBox(width: 8),
+                        if (!isRead)
+                          Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE1F0FF),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'UNREAD',
+                              style: TextStyle(
+                                color: Color(0xFF2673EC),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        Opacity(
+                          opacity: isRead ? 0.55 : 1,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: item.priorityColor,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              item.priority.toUpperCase(),
+                              style: TextStyle(
+                                color: item.priorityTextColor,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    item.message,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF2A324A),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_today_outlined,
-                        size: 14,
-                        color: Color(0xFF7B879C),
+                    SizedBox(height: _expanded ? 8 : 4),
+                    Text(
+                      item.message,
+                      maxLines: _expanded ? null : 1,
+                      overflow: _expanded
+                          ? TextOverflow.visible
+                          : TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: messageColor,
+                        fontSize: 14,
+                        height: 1.4,
+                        fontWeight: FontWeight.w500,
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          item.dateText,
-                          style: const TextStyle(
-                            color: Color(0xFF4C5A73),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                    ),
+                    SizedBox(height: _expanded ? 10 : 6),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today_outlined,
+                          size: 14,
+                          color: isRead
+                              ? const Color(0xFFB0B9C8)
+                              : const Color(0xFF7B879C),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            item.dateText,
+                            style: TextStyle(
+                              color: dateColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        size: 18,
-                        color: Color(0xFF8A95A8),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 4),
+                        AnimatedRotation(
+                          turns: _expanded ? 0.25 : 0,
+                          duration: const Duration(milliseconds: 220),
+                          child: Icon(
+                            Icons.chevron_right_rounded,
+                            size: 18,
+                            color: chevronColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

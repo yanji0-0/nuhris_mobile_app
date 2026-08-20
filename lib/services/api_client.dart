@@ -375,7 +375,7 @@ class ApiClient implements AppApiClient {
     }).length;
 
     final unreadNotifications = notificationItems
-      .where((row) => row['isRead'] != true)
+      .where((row) => row['is_read'] != true)
       .length;
 
     final totalLeaveDays = leaveBalances.whereType<Map>().fold<double>(0, (
