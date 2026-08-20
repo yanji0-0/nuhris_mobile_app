@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../models/academic_calendar_entry.dart';
+
 abstract class AppApiClient {
   Future<bool> hasEmployeeAccess();
   Future<void> login({required String email, required String password});
@@ -25,6 +27,9 @@ abstract class AppApiClient {
   Future<void> markAllNotificationsRead();
   Future<void> markNotificationRead(String notificationId);
   Future<void> clearAllNotifications();
+
+  // Academic Calendar
+  Future<List<AcademicCalendarEntry>> getAcademicCalendarEntries();
 
   // Attendance / schedule
   Future<List<Map<String, dynamic>>> getAttendanceDtr();

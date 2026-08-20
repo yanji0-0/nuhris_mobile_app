@@ -5,6 +5,7 @@ import '../navigation/app_nav.dart';
 import '../providers/notifications_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({
@@ -73,23 +74,13 @@ class NotificationsScreen extends ConsumerWidget {
           Navigator.pop(context);
           onNavigate(item);
         },
-        onSignOut: onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1B66),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A1B66),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text('Notifications'),
-        actions: [
-          IconButton(
-            onPressed: () => onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Notifications',
+        currentItem: AppNavItem.notifications,
+        onNavigate: onNavigate,
+        onSignOut: onSignOut,
+        showNotifications: false,
       ),
       body: Container(
         decoration: const BoxDecoration(

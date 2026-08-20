@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:typed_data';
 
 import 'package:nuhris_mobile_app/app_shell.dart';
+import 'package:nuhris_mobile_app/models/academic_calendar_entry.dart';
 import 'package:nuhris_mobile_app/providers/api_client_provider.dart';
 import 'package:nuhris_mobile_app/services/api_client_contract.dart';
 import 'package:nuhris_mobile_app/screens/auth/sign_in_screen.dart';
@@ -12,7 +13,14 @@ class FakeApiClient implements AppApiClient {
   Future<void> clearAllNotifications() async {}
 
   @override
+  Future<List<AcademicCalendarEntry>> getAcademicCalendarEntries() async => [];
+
+  @override
   Future<List<Map<String, dynamic>>> getNotifications() async => [];
+
+  @override
+  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() async =>
+      null;
 
   @override
   Future<bool> hasEmployeeAccess() async => false;

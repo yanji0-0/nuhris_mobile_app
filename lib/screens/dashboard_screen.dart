@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/academic_calendar_entry.dart';
 import '../navigation/app_nav.dart';
+import '../providers/academic_calendar_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/dashboard_calendar.dart';
 import '../providers/dashboard_provider.dart';
+import '../widgets/nuhris_app_bar.dart';
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({
     super.key,
     required this.onNavigate,
@@ -19,8 +22,25 @@ class DashboardScreen extends ConsumerWidget {
   final VoidCallback onSignOut;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(academicCalendarProvider.notifier).refresh();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(dashboardProvider);
+    final academicCalendarState = ref.watch(academicCalendarProvider);
+    final academicCalendarController = ref.read(
+      academicCalendarProvider.notifier,
+    );
 
     if (state.isLoading) {
       return Scaffold(
@@ -28,18 +48,14 @@ class DashboardScreen extends ConsumerWidget {
           selected: AppNavItem.dashboard,
           onSelect: (item) {
             Navigator.pop(context);
-            onNavigate(item);
+            widget.onNavigate(item);
           },
-          onSignOut: onSignOut,
         ),
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF0A1B66),
-          foregroundColor: Colors.white,
-          surfaceTintColor: const Color(0xFF0A1B66),
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          scrolledUnderElevation: 0,
-          title: const Text('Dashboard'),
+        appBar: NuhrisAppBar(
+          title: 'Dashboard',
+          currentItem: AppNavItem.dashboard,
+          onNavigate: widget.onNavigate,
+          onSignOut: widget.onSignOut,
         ),
         body: const Center(child: CircularProgressIndicator()),
       );
@@ -51,18 +67,14 @@ class DashboardScreen extends ConsumerWidget {
           selected: AppNavItem.dashboard,
           onSelect: (item) {
             Navigator.pop(context);
-            onNavigate(item);
+            widget.onNavigate(item);
           },
-          onSignOut: onSignOut,
         ),
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF0A1B66),
-          foregroundColor: Colors.white,
-          surfaceTintColor: const Color(0xFF0A1B66),
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          scrolledUnderElevation: 0,
-          title: const Text('Dashboard'),
+        appBar: NuhrisAppBar(
+          title: 'Dashboard',
+          currentItem: AppNavItem.dashboard,
+          onNavigate: widget.onNavigate,
+          onSignOut: widget.onSignOut,
         ),
         body: Center(
           child: Padding(
@@ -154,18 +166,14 @@ class DashboardScreen extends ConsumerWidget {
         selected: AppNavItem.dashboard,
         onSelect: (item) {
           Navigator.pop(context);
-          onNavigate(item);
+          widget.onNavigate(item);
         },
-        onSignOut: onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A1B66),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A1B66),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text('Dashboard'),
+      appBar: NuhrisAppBar(
+        title: 'Dashboard',
+        currentItem: AppNavItem.dashboard,
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -245,7 +253,7 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                       ),
                       TextButton(
-                        onPressed: () => onNavigate(AppNavItem.notifications),
+                        onPressed: () => widget.onNavigate(AppNavItem.notifications),
                         child: const Text('View All'),
                       ),
                     ],
@@ -314,53 +322,125 @@ class DashboardScreen extends ConsumerWidget {
           final calendarPanel = Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'System Calendar',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 12),
-                  DashboardCalendar(),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'UPCOMING EVENTS',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.mutedText,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (notifications.isEmpty)
-                    const Text(
-                      'No upcoming events yet.',
-                      style: TextStyle(color: AppColors.mutedText),
-                    )
-                  else
-                    ...notifications.take(2).map((n) {
-                      final announcement =
-                          (n['announcement'] as Map?)
-                              ?.cast<String, dynamic>() ??
-                          {};
-                      final title = (announcement['title'] ?? 'Notification')
-                          .toString();
-                      final subtitle =
-                          (announcement['published_at'] ??
-                                  n['created_at'] ??
-                                  '')
-                              .toString();
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _EventRow(
-                          color: AppColors.primaryBlue,
-                          title: title,
-                          subtitle: _formatTimestamp(subtitle),
+              child: academicCalendarState.when(
+                loading: () => const SizedBox(
+                  height: 220,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (error, stackTrace) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'System Calendar',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                         ),
-                      );
-                    }),
-                ],
+                        TextButton(
+                          onPressed: () =>
+                              widget.onNavigate(AppNavItem.academicCalendar),
+                          child: const Text('Open Calendar'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Failed to load Academic Calendar: $error',
+                      style: const TextStyle(color: AppColors.mutedText),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: academicCalendarController.refresh,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+                data: (calendarData) {
+                  final selectedEntries = calendarData.selectedDateEntries;
+                  final upcomingEntries = calendarData.upcomingEntries.take(3).toList();
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'System Calendar',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                widget.onNavigate(AppNavItem.academicCalendar),
+                            child: const Text('Open Calendar'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      DashboardCalendar(
+                        visibleMonth: calendarData.visibleMonth,
+                        selectedDay: calendarData.selectedDate,
+                        eventDates: calendarData.eventDates,
+                        onPreviousMonth: () {
+                          academicCalendarController.goToPreviousMonth();
+                        },
+                        onNextMonth: () {
+                          academicCalendarController.goToNextMonth();
+                        },
+                        onDaySelected: academicCalendarController.selectDate,
+                      ),
+                      const SizedBox(height: 14),
+                      if (selectedEntries.isNotEmpty) ...[
+                        const Text(
+                          'SELECTED DATE',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...selectedEntries.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _CalendarEntryDetailCard(entry: entry),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      const Text(
+                        'UPCOMING EVENTS',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (upcomingEntries.isEmpty)
+                        const Text(
+                          'No upcoming Academic Calendar events yet.',
+                          style: TextStyle(color: AppColors.mutedText),
+                        )
+                      else
+                        ...upcomingEntries.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _AcademicUpcomingEventRow(entry: entry),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
           );
@@ -635,6 +715,121 @@ class _EventRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AcademicUpcomingEventRow extends StatelessWidget {
+  const _AcademicUpcomingEventRow({required this.entry});
+
+  final AcademicCalendarEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = entry.isHoliday ? AppColors.orange : AppColors.primaryBlue;
+    final dateLabel = DateFormat('MMM d').format(entry.eventDate);
+
+    return _EventRow(
+      color: color,
+      title: '$dateLabel - ${entry.title} (${entry.entryTypeLabel})',
+      subtitle: entry.dayTypeLabel,
+    );
+  }
+}
+
+class _CalendarEntryDetailCard extends StatelessWidget {
+  const _CalendarEntryDetailCard({required this.entry});
+
+  final AcademicCalendarEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final entryColor = entry.isHoliday ? AppColors.orange : AppColors.primaryBlue;
+    final dayTypeColor = entry.isNonWorkingDay ? AppColors.red : AppColors.green;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F9FD),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFDCE2ED)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            entry.title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            DateFormat('MMM d, yyyy').format(entry.eventDate),
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.mutedText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _MiniStatusChip(
+                label: entry.entryTypeLabel,
+                color: entryColor,
+              ),
+              _MiniStatusChip(
+                label: entry.dayTypeLabel,
+                color: dayTypeColor,
+              ),
+            ],
+          ),
+          if (entry.description != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              entry.description!,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF2A324A),
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniStatusChip extends StatelessWidget {
+  const _MiniStatusChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }

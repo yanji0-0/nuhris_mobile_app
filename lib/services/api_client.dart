@@ -1,8 +1,12 @@
 import 'package:bcrypt/bcrypt.dart';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/app_config.dart';
+import '../models/academic_calendar_entry.dart';
 import 'api_client_contract.dart';
 
 class ApiClient implements AppApiClient {
@@ -634,6 +638,53 @@ class ApiClient implements AppApiClient {
       'counts': counts,
       if (errors.isNotEmpty) 'errors': errors,
     };
+  }
+
+  @override
+  Future<List<AcademicCalendarEntry>> getAcademicCalendarEntries() async {
+    final baseUrl = AppConfig.laravelBaseUrl.trim();
+    if (baseUrl.isEmpty) {
+      throw ApiException(
+        'Academic Calendar API is not configured. Set LARAVEL_BASE_URL.',
+      );
+    }
+
+    final normalizedBaseUrl = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    final uri = Uri.parse('$normalizedBaseUrl/api/academic-calendar');
+
+    late http.Response response;
+    try {
+      response = await http.get(
+        uri,
+        headers: const {'Accept': 'application/json'},
+      );
+    } catch (error) {
+      throw ApiException('Failed to load Academic Calendar: $error');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        'Academic Calendar request failed: ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      throw ApiException('Academic Calendar API returned an invalid payload.');
+    }
+
+    final entries = decoded
+        .whereType<Map>()
+        .map((row) => AcademicCalendarEntry.fromJson(
+              row.cast<String, dynamic>(),
+            ))
+        .toList()
+      ..sort((left, right) => left.eventDate.compareTo(right.eventDate));
+
+    return entries;
   }
 
   @override

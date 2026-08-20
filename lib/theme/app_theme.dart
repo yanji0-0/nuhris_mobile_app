@@ -4,7 +4,12 @@ import 'package:google_fonts/google_fonts.dart';
 class AppColors {
   static const navy = Color(0xFF063A63); // deep blue/navy
   static const primaryBlue = Color(0xFF0B67B2); // app bar blue
+  static const appBarNavy = Color(0xFF0A1B66);
   static const nuhrisYellow = Color(0xFFFFD000);
+
+  /// Employee avatar: navy background, white initials.
+  static const employeeAvatarBackground = appBarNavy;
+  static const employeeAvatarForeground = Colors.white;
 
   static const pageBg = Color(0xFFE9EEF3);
   static const cardBg = Colors.white;

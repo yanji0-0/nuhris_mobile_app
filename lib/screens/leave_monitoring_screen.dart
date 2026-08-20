@@ -5,6 +5,7 @@ import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class LeaveMonitoringScreen extends ConsumerStatefulWidget {
   const LeaveMonitoringScreen({
@@ -39,26 +40,12 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A2E86),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A2E86),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'Leave Monitoring',
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none_rounded),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Leave Monitoring',
+        currentItem: AppNavItem.leaveMonitoring,
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
@@ -109,42 +96,39 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
             child: SafeArea(
               top: false,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
                 children: [
-                  const SizedBox(height: 6),
                   const Text(
-                    'View your leave balances and history.\nLeave data is managed by HR (read-only).',
+                    'View your leave balances and history (read-only).',
                     style: TextStyle(
                       color: AppColors.mutedText,
-                      fontSize: 16,
-                      height: 1.35,
-                      fontWeight: FontWeight.w400,
+                      fontSize: 13,
+                      height: 1.3,
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   _LeaveUsageSummaryPanel(usageSummary: usageSummary),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   _BalancePanel(balances: balances),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   _LeaveUsageBreakdownPanel(breakdown: breakdown),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   const Text(
                     'Leave History',
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF1E293B),
-                      letterSpacing: -0.4,
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 8),
                   if (requests.isEmpty)
                     const _EmptyHistoryCard()
                   else
                     ...requests
                         .take(20)
                         .map((request) => _LeaveHistoryCard(request: request)),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 12),
                   const _FooterNote(),
                 ],
               ),
@@ -397,37 +381,28 @@ class _BalancePanel extends StatelessWidget {
     if (balances.isEmpty) {
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
           color: const Color(0xFFF6F8FE),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFCAD7F7), width: 1.2),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFCAD7F7)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF4D79F0), width: 2),
-              ),
-              child: const Icon(
-                Icons.info_outline_rounded,
-                size: 16,
-                color: Color(0xFF4D79F0),
-              ),
+            const Icon(
+              Icons.info_outline_rounded,
+              size: 16,
+              color: Color(0xFF4D79F0),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             const Expanded(
               child: Text(
-                'No leave balance data available yet.\nHR will upload this information.',
+                'No leave balance data available yet.',
                 style: TextStyle(
                   color: Color(0xFF2A4EA8),
-                  fontSize: 13,
-                  height: 1.35,
-                  fontWeight: FontWeight.w500,
+                  fontSize: 12,
+                  height: 1.3,
                 ),
               ),
             ),
@@ -440,36 +415,29 @@ class _BalancePanel extends StatelessWidget {
       children: balances.take(4).map((balance) {
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xFFE6EAF3)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0F204070),
-                blurRadius: 20,
-                offset: Offset(0, 8),
-              ),
-            ],
           ),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEAF1FF),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.beach_access_rounded,
                   color: Color(0xFF2852C7),
-                  size: 22,
+                  size: 18,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,16 +445,16 @@ class _BalancePanel extends StatelessWidget {
                     Text(
                       (balance['leave_type'] ?? 'Leave').toString(),
                       style: const TextStyle(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: Color(0xFF1F2937),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       '${_remainingDays(balance['remaining_days'])} remaining',
                       style: const TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 12,
                         color: AppColors.mutedText,
                       ),
                     ),
@@ -514,39 +482,42 @@ class _LeaveUsageSummaryPanel extends StatelessWidget {
         const Text(
           'Leave Usage Summary',
           style: TextStyle(
-            fontSize: 18,
+            fontSize: 15,
             fontWeight: FontWeight.w800,
             color: Color(0xFF111827),
           ),
         ),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 1,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          childAspectRatio: 3.2,
+        const SizedBox(height: 8),
+        Row(
           children: [
-            _UsageSummaryCard(
-              label: 'Vacation Used',
-              value: _formatDaysUsed(usageSummary['Vacation Used']),
-              foreground: const Color(0xFF1F8A46),
-              background: const Color(0xFFE7F8EC),
-              border: const Color(0xFFBFE6CD),
+            Expanded(
+              child: _UsageSummaryCard(
+                label: 'Vacation',
+                value: _formatDaysUsed(usageSummary['Vacation Used']),
+                foreground: const Color(0xFF1F8A46),
+                background: const Color(0xFFE7F8EC),
+                border: const Color(0xFFBFE6CD),
+              ),
             ),
-            _UsageSummaryCard(
-              label: 'Sick Used',
-              value: _formatDaysUsed(usageSummary['Sick Used']),
-              foreground: const Color(0xFFB7791F),
-              background: const Color(0xFFFFF4DD),
-              border: const Color(0xFFF1D79B),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _UsageSummaryCard(
+                label: 'Sick',
+                value: _formatDaysUsed(usageSummary['Sick Used']),
+                foreground: const Color(0xFFB7791F),
+                background: const Color(0xFFFFF4DD),
+                border: const Color(0xFFF1D79B),
+              ),
             ),
-            _UsageSummaryCard(
-              label: 'Emergency Used',
-              value: _formatDaysUsed(usageSummary['Emergency Used']),
-              foreground: const Color(0xFF7C3AED),
-              background: const Color(0xFFF1E9FF),
-              border: const Color(0xFFDCC8FF),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _UsageSummaryCard(
+                label: 'Emergency',
+                value: _formatDaysUsed(usageSummary['Emergency Used']),
+                foreground: const Color(0xFF7C3AED),
+                background: const Color(0xFFF1E9FF),
+                border: const Color(0xFFDCC8FF),
+              ),
             ),
           ],
         ),
@@ -573,30 +544,30 @@ class _UsageSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: foreground,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
             ),
           ),
+          const SizedBox(height: 4),
           Text(
             value,
             style: TextStyle(
               color: foreground,
               fontWeight: FontWeight.w800,
-              fontSize: 28,
+              fontSize: 20,
             ),
           ),
         ],
@@ -617,10 +588,10 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE6EAF3)),
       ),
       child: Column(
@@ -629,31 +600,30 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
           const Text(
             'Detailed Leave Usage',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 15,
               fontWeight: FontWeight.w800,
               color: Color(0xFF111827),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           if (deductible.isEmpty && trackedOnly.isEmpty)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
+              padding: EdgeInsets.symmetric(vertical: 6),
               child: Text(
                 'No approved leave usage yet.',
-                style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
               ),
             ),
           if (deductible.isNotEmpty) ...[
             const Text(
-              'Leaves That Affect Balance',
+              'Affects Balance',
               style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
                 color: Color(0xFF15803D),
-                letterSpacing: 0.3,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             ...deductible.map(
               (usage) => _UsageBreakdownCard(
                 type: (usage['type'] ?? 'Leave').toString(),
@@ -665,19 +635,18 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
                 valueColor: const Color(0xFF15803D),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
           ],
           if (trackedOnly.isNotEmpty) ...[
             const Text(
-              'Tracked Leaves (Balance Not Affected)',
+              'Tracked Only',
               style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
                 color: Color(0xFF475569),
-                letterSpacing: 0.3,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             ...trackedOnly.map(
               (usage) => _UsageBreakdownCard(
                 type: (usage['type'] ?? 'Leave').toString(),
@@ -687,15 +656,6 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
                 border: const Color(0xFFE2E8F0),
                 titleColor: const Color(0xFF0F172A),
                 valueColor: const Color(0xFF334155),
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Note: These leaves are tracked for record-keeping but do not reduce your leave balance.',
-              style: TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
               ),
             ),
           ],
@@ -727,11 +687,11 @@ class _UsageBreakdownCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: border),
       ),
       child: Row(
@@ -745,15 +705,14 @@ class _UsageBreakdownCard extends StatelessWidget {
                   style: TextStyle(
                     color: titleColor,
                     fontWeight: FontWeight.w700,
-                    fontSize: 14,
+                    fontSize: 13,
                   ),
                 ),
-                const SizedBox(height: 4),
                 Text(
                   '$count request(s)',
                   style: const TextStyle(
                     color: Color(0xFF64748B),
-                    fontSize: 12,
+                    fontSize: 11,
                   ),
                 ),
               ],
@@ -764,7 +723,7 @@ class _UsageBreakdownCard extends StatelessWidget {
             style: TextStyle(
               color: valueColor,
               fontWeight: FontWeight.w800,
-              fontSize: 22,
+              fontSize: 18,
             ),
           ),
         ],
@@ -798,121 +757,73 @@ class _LeaveHistoryCard extends StatelessWidget {
         .trim();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x110E1B3D),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-        border: Border.all(color: const Color(0xFFF0F2F8)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6EAF3)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEAF1FF),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.calendar_month_rounded,
-              color: Color(0xFF2852C7),
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        leaveType,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF111827),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    _StatusPill(
-                      label: _statusLabel(status),
-                      backgroundColor: _statusBackground(status),
-                      foregroundColor: _statusForeground(status),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '${_formatDate(startDate)} - ${_formatDate(endDate)}',
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  leaveType,
                   style: const TextStyle(
                     fontSize: 14,
-                    color: Color(0xFF334155),
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF111827),
                   ),
                 ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 14,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _MetaItem(
-                      icon: Icons.event_note_rounded,
-                      label:
-                          '${daysDeducted.isEmpty ? '-' : daysDeducted} Days',
-                    ),
-                    _MetaItem(
-                      icon: Icons.schedule_rounded,
-                      label: 'Cut-off: ${_formatDate(cutoffDate)}',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF64748B),
-                      height: 1.35,
-                    ),
-                    children: [
-                      const TextSpan(
-                        text: 'Reason: ',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      TextSpan(
-                        text: displayReason.isEmpty ? leaveType : displayReason,
-                      ),
-                      const TextSpan(text: '   '),
-                      const TextSpan(
-                        text: 'Source status: ',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      TextSpan(
-                        text: status.isEmpty ? 'PENDING' : status.toUpperCase(),
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
+              const SizedBox(width: 8),
+              _StatusPill(
+                label: _statusLabel(status),
+                backgroundColor: _statusBackground(status),
+                foregroundColor: _statusForeground(status),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${_formatDate(startDate)} – ${_formatDate(endDate)}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF334155),
+              fontWeight: FontWeight.w500,
             ),
           ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: [
+              _MetaItem(
+                icon: Icons.event_note_rounded,
+                label: '${daysDeducted.isEmpty ? '-' : daysDeducted} days',
+              ),
+              _MetaItem(
+                icon: Icons.schedule_rounded,
+                label: 'Cut-off: ${_formatDate(cutoffDate)}',
+              ),
+            ],
+          ),
+          if (displayReason.isNotEmpty &&
+              displayReason.toLowerCase() != leaveType.toLowerCase()) ...[
+            const SizedBox(height: 8),
+            Text(
+              displayReason,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF64748B),
+                height: 1.3,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -933,17 +844,17 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: TextStyle(
           color: foregroundColor,
           fontWeight: FontWeight.w700,
-          fontSize: 12.5,
+          fontSize: 11,
         ),
       ),
     );
@@ -961,13 +872,13 @@ class _MetaItem extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 18, color: const Color(0xFF64748B)),
-        const SizedBox(width: 6),
+        Icon(icon, size: 14, color: const Color(0xFF64748B)),
+        const SizedBox(width: 4),
         Text(
           label,
           style: const TextStyle(
             color: Color(0xFF475569),
-            fontSize: 13.5,
+            fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -982,17 +893,11 @@ class _EmptyHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 26),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x110E1B3D),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6EAF3)),
       ),
       child: const Center(
         child: Text(
@@ -1000,7 +905,7 @@ class _EmptyHistoryCard extends StatelessWidget {
           style: TextStyle(
             color: Color(0xFF94A3B8),
             fontWeight: FontWeight.w600,
-            fontSize: 15,
+            fontSize: 13,
           ),
         ),
       ),
@@ -1014,16 +919,12 @@ class _FooterNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Text(
-          'All leave records are for your reference only.\nFor any concerns, please contact HR.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF8B95A7),
-            fontSize: 14,
-            height: 1.35,
-          ),
+      child: Text(
+        'For concerns, contact HR.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFF8B95A7),
+          fontSize: 12,
         ),
       ),
     );

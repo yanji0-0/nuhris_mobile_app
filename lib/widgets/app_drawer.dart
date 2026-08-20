@@ -2,25 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
-import '../theme/app_theme.dart';
 import '../providers/account_provider.dart';
+import '../theme/app_theme.dart';
+import '../utils/employee_initials.dart';
 
 class AppDrawer extends ConsumerWidget {
   const AppDrawer({
     super.key,
     required this.selected,
     required this.onSelect,
-    required this.onSignOut,
   });
 
   final AppNavItem selected;
   final ValueChanged<AppNavItem> onSelect;
-  final VoidCallback onSignOut;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final accountAsync = ref.watch(accountProvider);
-    final profileAsync = ref.watch(profilePhotoProvider);
 
     return accountAsync.when(
       data: (account) {
@@ -51,7 +49,7 @@ class AppDrawer extends ConsumerWidget {
                 _Header(
                   displayName: displayName,
                   email: email,
-                  profilePhotoAsync: profileAsync,
+                  employeeInitials: employeeInitialsFromAccount(account),
                 ),
                 const SizedBox(height: 14),
                 Expanded(
@@ -71,19 +69,19 @@ class AppDrawer extends ConsumerWidget {
                         onTap: () => onSelect(AppNavItem.credentials),
                       ),
                       _DrawerItem(
+                        icon: Icons.calendar_month_outlined,
+                        label: 'Academic Calendar',
+                        selected: selected == AppNavItem.academicCalendar,
+                        onTap: () => onSelect(AppNavItem.academicCalendar),
+                      ),
+                      _DrawerItem(
                         icon: Icons.access_time,
                         label: 'Attendance & DTR',
                         selected: selected == AppNavItem.attendanceDtr,
                         onTap: () => onSelect(AppNavItem.attendanceDtr),
                       ),
                       _DrawerItem(
-                        icon: Icons.format_list_bulleted,
-                        label: 'WFH Monitoring',
-                        selected: selected == AppNavItem.wfhMonitoring,
-                        onTap: () => onSelect(AppNavItem.wfhMonitoring),
-                      ),
-                      _DrawerItem(
-                        icon: Icons.calendar_month_outlined,
+                        icon: Icons.event_note_outlined,
                         label: 'Leave Monitoring',
                         selected: selected == AppNavItem.leaveMonitoring,
                         onTap: () => onSelect(AppNavItem.leaveMonitoring),
@@ -123,7 +121,6 @@ class AppDrawer extends ConsumerWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         'HRIS · v1.0',
@@ -131,34 +128,6 @@ class AppDrawer extends ConsumerWidget {
                           color: Colors.white.withValues(alpha: 0.82),
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: onSignOut,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.logout,
-                                color: Colors.white70,
-                                size: 18,
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                'Sign Out',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                     ],
@@ -197,12 +166,12 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.displayName,
     required this.email,
-    required this.profilePhotoAsync,
+    required this.employeeInitials,
   });
 
   final String displayName;
   final String email;
-  final AsyncValue<String?> profilePhotoAsync;
+  final String employeeInitials;
 
   @override
   Widget build(BuildContext context) {
@@ -239,11 +208,11 @@ class _Header extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: const Text(
-                  'N',
+                  'NU',
                   style: TextStyle(
-                    color: Color(0xFF0A1B66),
+                    color: AppColors.appBarNavy,
                     fontWeight: FontWeight.w900,
-                    fontSize: 22,
+                    fontSize: 16,
                   ),
                 ),
               ),
@@ -283,30 +252,16 @@ class _Header extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Row(
               children: [
-                profilePhotoAsync.when(
-                  data: (photoUrl) {
-                    final hasPhoto =
-                        photoUrl != null && photoUrl.trim().isNotEmpty;
-                    return CircleAvatar(
-                      radius: 16,
-                      backgroundColor: AppColors.nuhrisYellow,
-                      backgroundImage: hasPhoto
-                          ? NetworkImage(photoUrl.trim())
-                          : null,
-                      child: !hasPhoto
-                          ? Icon(Icons.person, color: AppColors.navy, size: 18)
-                          : null,
-                    );
-                  },
-                  loading: () => CircleAvatar(
-                    radius: 16,
-                    backgroundColor: AppColors.nuhrisYellow,
-                    child: const SizedBox.shrink(),
-                  ),
-                  error: (_, __) => CircleAvatar(
-                    radius: 16,
-                    backgroundColor: AppColors.nuhrisYellow,
-                    child: Icon(Icons.person, color: AppColors.navy, size: 18),
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.employeeAvatarBackground,
+                  child: Text(
+                    employeeInitials,
+                    style: const TextStyle(
+                      color: AppColors.employeeAvatarForeground,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),

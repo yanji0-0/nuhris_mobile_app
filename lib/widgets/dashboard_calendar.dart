@@ -1,40 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-/// Dashboard calendar with:
-/// - real month grid based on actual DateTime
-/// - previous/next month navigation
-/// - day selection
-class DashboardCalendar extends StatefulWidget {
-  const DashboardCalendar({super.key});
+class DashboardCalendar extends StatelessWidget {
+  const DashboardCalendar({
+    super.key,
+    required this.visibleMonth,
+    required this.selectedDay,
+    required this.eventDates,
+    required this.onPreviousMonth,
+    required this.onNextMonth,
+    required this.onDaySelected,
+  });
 
-  @override
-  State<DashboardCalendar> createState() => _DashboardCalendarState();
-}
-
-class _DashboardCalendarState extends State<DashboardCalendar> {
-  late DateTime _visibleMonth; // first day of currently shown month
-  DateTime? _selectedDay;
-
-  @override
-  void initState() {
-    super.initState();
-    final now = DateTime.now();
-    _visibleMonth = DateTime(now.year, now.month, 1);
-    _selectedDay = DateTime(now.year, now.month, now.day);
-  }
-
-  void _goToPreviousMonth() {
-    setState(() {
-      _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month - 1, 1);
-    });
-  }
-
-  void _goToNextMonth() {
-    setState(() {
-      _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + 1, 1);
-    });
-  }
+  final DateTime visibleMonth;
+  final DateTime? selectedDay;
+  final Set<DateTime> eventDates;
+  final VoidCallback onPreviousMonth;
+  final VoidCallback onNextMonth;
+  final ValueChanged<DateTime> onDaySelected;
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
@@ -66,8 +49,8 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
 
   @override
   Widget build(BuildContext context) {
-    final days = _calendarDaysForMonth(_visibleMonth);
-    final monthLabel = DateFormat('MMMM yyyy').format(_visibleMonth);
+    final days = _calendarDaysForMonth(visibleMonth);
+    final monthLabel = DateFormat('MMMM yyyy').format(visibleMonth);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -89,7 +72,7 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
           Row(
             children: [
               IconButton(
-                onPressed: _goToPreviousMonth,
+                onPressed: onPreviousMonth,
                 icon: const Icon(Icons.chevron_left),
               ),
               Expanded(
@@ -104,7 +87,7 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
                 ),
               ),
               IconButton(
-                onPressed: _goToNextMonth,
+                onPressed: onNextMonth,
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
@@ -138,9 +121,11 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
             ),
             itemBuilder: (context, index) {
               final day = days[index];
-              final inCurrentMonth = day.month == _visibleMonth.month;
-              final isSelected = _selectedDay != null && _isSameDay(day, _selectedDay!);
+              final normalizedDay = DateUtils.dateOnly(day);
+              final inCurrentMonth = day.month == visibleMonth.month;
+              final isSelected = selectedDay != null && _isSameDay(day, selectedDay!);
               final isToday = _isToday(day);
+              final hasEvents = eventDates.any((date) => _isSameDay(date, normalizedDay));
 
               Color bgColor = Colors.transparent;
               Color textColor = inCurrentMonth ? const Color(0xFF1F2937) : const Color(0xFF9CA3AF);
@@ -159,13 +144,7 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
               return InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
-                  setState(() {
-                    _selectedDay = day;
-                    // Optional UX: if user taps trailing/leading month day, switch month
-                    if (day.month != _visibleMonth.month) {
-                      _visibleMonth = DateTime(day.year, day.month, 1);
-                    }
-                  });
+                  onDaySelected(day);
                 },
                 child: Container(
                   decoration: BoxDecoration(
@@ -174,16 +153,38 @@ class _DashboardCalendarState extends State<DashboardCalendar> {
                     border: Border.all(
                       color: isToday && !isSelected
                           ? const Color(0xFFBFDBFE)
+                          : hasEvents
+                          ? const Color(0xFFBFDBFE)
                           : Colors.transparent,
                     ),
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '${day.day}',
-                    style: TextStyle(
-                      color: textColor,
-                      fontWeight: fw,
-                    ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '${day.day}',
+                        style: TextStyle(
+                          color: textColor,
+                          fontWeight: fw,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      SizedBox(
+                        height: 6,
+                        child: hasEvents
+                            ? Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : const Color(0xFF2563EB),
+                                  shape: BoxShape.circle,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ],
                   ),
                 ),
               );

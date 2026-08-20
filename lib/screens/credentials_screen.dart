@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../navigation/app_nav.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
-import 'credential_upload_screen.dart';
+import '../widgets/nuhris_app_bar.dart';
 
 class CredentialsScreen extends ConsumerStatefulWidget {
   const CredentialsScreen({
@@ -412,18 +412,6 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     return path.substring(dot + 1);
   }
 
-  void _openUploadScreen() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CredentialUploadScreen(
-          onNavigate: widget.onNavigate,
-          onSubmitted: _loadCredentials,
-        ),
-      ),
-    );
-  }
-
   Future<void> _viewFile(Map<String, dynamic> item) async {
     final stored = (item['file_path'] ?? '').toString();
     if (stored.isEmpty) {
@@ -574,57 +562,6 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     }
   }
 
-  Future<void> _confirmDeleteCredential(Map<String, dynamic> item) async {
-    final confirmed = await showDialog<bool?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete credential'),
-        content: const Text(
-          'Are you sure you want to delete this credential? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      final id = item['id'];
-      final filePath = (item['file_path'] ?? '').toString();
-      final api = ref.read(apiClientProvider);
-      await api.deleteEmployeeCredential(
-        id: id,
-        filePath: filePath.isEmpty ? null : filePath,
-      );
-
-      // Reload from server and verify row is actually gone to avoid false success.
-      await _loadCredentials();
-      final stillExists = _credentials.any((c) => c['id'] == id);
-      if (stillExists) {
-        throw Exception(
-          'Delete did not apply on server. Your account may not have DELETE permission for this credential.',
-        );
-      }
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Credential deleted.')));
-    } catch (error) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete credential: $error')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -634,26 +571,12 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
           Navigator.pop(context);
           widget.onNavigate(item);
         },
-        onSignOut: widget.onSignOut,
       ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0A2E86),
-        foregroundColor: Colors.white,
-        surfaceTintColor: const Color(0xFF0A2E86),
-        elevation: 0,
-        shadowColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'Credentials',
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () => widget.onNavigate(AppNavItem.notifications),
-            icon: const Icon(Icons.notifications_none_rounded),
-            tooltip: 'Notifications',
-          ),
-        ],
+      appBar: NuhrisAppBar(
+        title: 'Credentials',
+        currentItem: AppNavItem.credentials,
+        onNavigate: widget.onNavigate,
+        onSignOut: widget.onSignOut,
       ),
       body: Container(
         decoration: const BoxDecoration(
@@ -701,7 +624,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           child: Padding(
                             padding: EdgeInsets.only(top: 8),
                             child: Text(
-                              'Upload and manage your credentials.\nHR will review and verify submissions.',
+                              'View your credential status, expiration dates, and HR review updates.',
                               style: TextStyle(
                                 color: Color(0xFF4B556A),
                                 fontSize: 16,
@@ -712,25 +635,6 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: ElevatedButton(
-                        onPressed: _openUploadScreen,
-                        child: const Text(
-                          'Upload New',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2B2F36),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
                     ),
                     const SizedBox(height: 16),
                     Container(
@@ -801,7 +705,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           border: Border.all(color: const Color(0xFFE6ECF6)),
                         ),
                         child: const Text(
-                          'No credentials found.\nUpload your first credential above.',
+                          'No credentials found.\nCredential records will appear here once available.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Color(0xFF92A0B5),
@@ -951,15 +855,6 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                     onPressed: () => _viewFile(item),
                                     icon: Icons.visibility_outlined,
                                     label: 'View',
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _CardActionButton(
-                                    onPressed: () =>
-                                        _confirmDeleteCredential(item),
-                                    icon: Icons.delete_outline,
-                                    label: 'Delete',
-                                    foreground: const Color(0xFFB3261E),
-                                    borderColor: const Color(0xFFF1CBD1),
                                   ),
                                 ],
                               ),
