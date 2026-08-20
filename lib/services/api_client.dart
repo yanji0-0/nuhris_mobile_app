@@ -1296,65 +1296,26 @@ class ApiClient implements AppApiClient {
     final normalized = storedPath.trim();
     if (normalized.isEmpty) return null;
 
-    // If it's already a full URL, return it.
+    // Legacy rows may already store a full URL.
     final uri = Uri.tryParse(normalized);
     if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
       return normalized;
     }
 
-    // Reuse existing logic for common stored-path patterns (profile photo style).
-    final fromProfile = await _tryCreateSignedUrlFromStoredPath(normalized);
-    if (fromProfile != null) return fromProfile;
-
-    // Try to parse as "bucket/object" if a slash exists.
-    final firstSlash = normalized.indexOf('/');
-    if (firstSlash > 0 && firstSlash < normalized.length - 1) {
-      final possibleBucket = normalized.substring(0, firstSlash);
-      final object = normalized.substring(firstSlash + 1);
-
-      // If the first part looks like a bucket name (in our list), try it.
-      final possibleBucketLower = possibleBucket.toLowerCase();
-      if (_credentialFilesBuckets.map((b) => b.toLowerCase()).contains(possibleBucketLower)) {
-        try {
-          return _client.storage.from(possibleBucketLower).getPublicUrl(object);
-        } catch (_) {
-          try {
-            return await _client.storage
-                .from(possibleBucketLower)
-                .createSignedUrl(object, 60 * 60 * 24 * 30);
-          } catch (_) {
-            // Fallback to trying other buckets below
-          }
-        }
-      }
+    // Web stores only the Supabase object key in file_path (not a URL), e.g.
+    // employee-12/1755712345_a3f19c2e.pdf
+    // employee-12/wfh-monitoring/1755712401_b7c04d11.pdf
+    // Both Credentials and WFH files live in the private "credentials" bucket.
+    try {
+      return await _client.storage
+          .from('credentials')
+          .createSignedUrl(normalized, 300);
+    } catch (error) {
+      throw ApiException(
+        'Failed to create a signed URL for this file. '
+        'Object key: $normalized. Error: $error',
+      );
     }
-
-    // Try the entire path across all known credential buckets.
-    // This handles cases where the stored path is "employee-XX/timestamp_file.pdf"
-    // and doesn't include a bucket prefix.
-    for (final bucket in _credentialFilesBuckets) {
-      final bucketName = bucket.toLowerCase();
-      try {
-        // Try public URL first (faster)
-        return _client.storage.from(bucketName).getPublicUrl(normalized);
-      } catch (_) {
-        // Try next bucket
-      }
-    }
-
-    // Last resort: try signed URLs in case RLS blocks public access
-    for (final bucket in _credentialFilesBuckets) {
-      final bucketName = bucket.toLowerCase();
-      try {
-        return await _client.storage
-            .from(bucketName)
-            .createSignedUrl(normalized, 60 * 60 * 24 * 30);
-      } catch (_) {
-        // Try next bucket
-      }
-    }
-
-    return null;
   }
 
   @override

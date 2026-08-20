@@ -176,11 +176,16 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
         return;
       }
 
-      final lower = url.toLowerCase();
-      if (lower.endsWith('.png') ||
-          lower.endsWith('.jpg') ||
-          lower.endsWith('.jpeg') ||
-          lower.contains('image/')) {
+      // Signed URLs include ?token=... — detect type from path, not the full URL.
+      final pathLower = (Uri.tryParse(url)?.path ?? url).toLowerCase();
+      final isImage = pathLower.endsWith('.png') ||
+          pathLower.endsWith('.jpg') ||
+          pathLower.endsWith('.jpeg') ||
+          pathLower.endsWith('.gif') ||
+          pathLower.endsWith('.webp');
+      final isPdf = pathLower.endsWith('.pdf');
+
+      if (isImage) {
         if (!context.mounted) return;
         showDialog(
           context: context,
@@ -222,7 +227,7 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
       }
 
       // For PDFs, show in-app viewer; for other docs, try external open and fallback to showing URL.
-      if (lower.endsWith('.pdf')) {
+      if (isPdf) {
         if (!context.mounted) return;
         Navigator.push(
           context,

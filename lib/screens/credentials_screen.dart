@@ -454,17 +454,13 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
       if (url == null || url.isEmpty) {
         if (!context.mounted) return;
 
-        // Show debug info about what was tried
-        final debugMsg =
-            'File not found. Stored path: $stored\n'
-            'Tried all known credential storage buckets. '
-            'The bucket may not exist or the file may have been deleted.';
-
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('File Not Found'),
-            content: Text(debugMsg),
+            content: Text(
+              'Could not open this file. Stored path: $stored',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
