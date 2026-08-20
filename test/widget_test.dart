@@ -52,12 +52,6 @@ class FakeApiClient implements AppApiClient {
   }) async => {'url': ''};
 
   @override
-  Future<void> changePassword({
-    required String currentPassword,
-    required String newPassword,
-  }) async {}
-
-  @override
   Future<void> updateAccount(Map<String, dynamic> updates) async {}
 
   @override

@@ -1,7 +1,8 @@
-import 'package:bcrypt/bcrypt.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+
+import 'package:bcrypt/bcrypt.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -79,18 +80,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Email and password are required.');
     }
 
+    AuthResponse authResult;
     try {
-      await _client.auth.signInWithPassword(
+      authResult = await _client.auth.signInWithPassword(
         email: normalizedEmail,
         password: password,
       );
-    } catch (_) {
+    } catch (error) {
       // Fallback to public users table login for projects not using Supabase Auth.
       final rows = await _client
           .from('users')
-          .select(
-            'id,name,email,password,user_type,must_change_password,email_verified_at',
-          )
+          .select('*')
           .ilike('email', normalizedEmail)
           .limit(1);
 
@@ -122,6 +122,15 @@ class ApiClient implements AppApiClient {
         await logout();
         throw ApiException(_loginFailedMessage);
       }
+
+      final employeeId = employee['id'];
+      if (employeeId != null) {
+        await _provisionAuthUserIfMissing(
+          email: normalizedEmail,
+          password: password,
+          employeeId: employeeId,
+        );
+      }
       return;
     }
 
@@ -138,6 +147,12 @@ class ApiClient implements AppApiClient {
     if (employee == null) {
       await logout();
       throw ApiException(_loginFailedMessage);
+    }
+
+    final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
+    final employeeId = employee['id'];
+    if (authUserId != null && authUserId.isNotEmpty && employeeId != null) {
+      await _syncEmployeeAuthId(employeeId: employeeId, authUserId: authUserId);
     }
   }
 
@@ -160,7 +175,11 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final attendanceRows = await _client
         .from('attendance_records')
         .select('status')
@@ -182,14 +201,7 @@ class ApiClient implements AppApiClient {
       employeeIdentifiers: credentialIdentifiers,
     );
 
-    final user = await _currentUserRow();
-    final userId = user?['id'];
-    final notificationRows = userId == null
-        ? const []
-        : await _client
-              .from('announcement_notifications')
-              .select('id,is_read')
-              .eq('user_id', userId);
+    final notificationItems = await getNotifications();
 
     final attendanceSummary = <String, int>{
       'present': 0,
@@ -352,9 +364,7 @@ class ApiClient implements AppApiClient {
 
     final compliantCredentials = credentialRows.whereType<Map>().where((row) {
       final item = row.cast<String, dynamic>();
-      return isApprovedCredential(item) &&
-          !isExpiredCredential(item) &&
-          !isExpiringSoonCredential(item);
+      return isApprovedCredential(item) && !isExpiredCredential(item);
     }).length;
 
     final nonCompliantCredentials = credentialRows.whereType<Map>().where((
@@ -364,10 +374,9 @@ class ApiClient implements AppApiClient {
       return !isApprovedCredential(item) || isExpiredCredential(item);
     }).length;
 
-    final unreadNotifications = notificationRows
-        .whereType<Map>()
-        .where((row) => row['is_read'] != true)
-        .length;
+    final unreadNotifications = notificationItems
+      .where((row) => row['isRead'] != true)
+      .length;
 
     final totalLeaveDays = leaveBalances.whereType<Map>().fold<double>(0, (
       sum,
@@ -398,7 +407,7 @@ class ApiClient implements AppApiClient {
         'compliant_count': compliantCredentials,
       },
       'notifications_summary': {
-        'total_count': notificationRows.length,
+        'total_count': notificationItems.length,
         'unread_count': unreadNotifications,
       },
     };
@@ -411,12 +420,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
+    final numericEmployeeId = _toIntId(employee['id']);
+    if (numericEmployeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final rows = await _client
         .from('attendance_records')
         .select(
           'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status,schedule_status,schedule_notes',
         )
-        .eq('employee_id', employee['id'])
+        .eq('employee_id', numericEmployeeId)
         .order('record_date', ascending: false);
 
     return _toMapList(rows);
@@ -429,12 +443,17 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
+    final numericEmployeeId = _toIntId(employee['id']);
+    if (numericEmployeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
+
     final submissionRows = await _client
         .from('employee_schedule_submissions')
         .select(
           'id,employee_id,term_label,semester_label,status,submitted_at,reviewed_at,review_notes,is_current',
         )
-        .eq('employee_id', employee['id'])
+        .eq('employee_id', numericEmployeeId)
         .order('submitted_at', ascending: false)
         .limit(1);
 
@@ -488,8 +507,11 @@ class ApiClient implements AppApiClient {
       throw ApiException('At least one schedule day is required.');
     }
 
-    final employeeId = employee['id'];
-    final submittedBy = user['id'];
+    final employeeId = _toIntId(employee['id']);
+    final submittedBy = _toIntId(user['id']);
+    if (employeeId == null || submittedBy == null) {
+      throw ApiException('Employee or user profile not found.');
+    }
     final submittedAt = DateTime.now().toUtc().toIso8601String();
 
     late int submissionId;
@@ -560,7 +582,10 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
     final balances = await _client
         .from('leave_balances')
         .select(
@@ -694,15 +719,242 @@ class ApiClient implements AppApiClient {
       throw ApiException('User profile not found.');
     }
 
-    final rows = await _client
-        .from('announcement_notifications')
-        .select(
-          'id,user_id,announcement_id,is_read,read_at,created_at,announcement:announcements(*)',
-        )
-        .eq('user_id', user['id'])
-        .order('created_at', ascending: false);
+    final employee = await _currentEmployee();
 
-    return _toMapList(rows);
+    final notificationUserIds = <int>{};
+
+    final currentUserId = _toIntId(user['id']);
+    if (currentUserId != null) {
+      notificationUserIds.add(currentUserId);
+    }
+
+    final employeeUserId = _toIntId(employee?['user_id']);
+    if (employeeUserId != null) {
+      notificationUserIds.add(employeeUserId);
+    }
+
+    if (notificationUserIds.isEmpty) {
+      debugPrint('🔔 Notifications: no user IDs resolved.');
+      return const [];
+    }
+
+    debugPrint(
+      '🔔 Notifications: loading for user IDs ${notificationUserIds.toList()}',
+    );
+
+    try {
+      // ============================================================
+      // STEP 1: Load notification rows first.
+      // ============================================================
+      final notificationRows = await _client
+          .from('announcement_notifications')
+          .select(
+            'id,user_id,announcement_id,is_read,read_at,created_at,updated_at,redirect_url',
+          )
+          .inFilter('user_id', notificationUserIds.toList())
+          .order('created_at', ascending: false);
+
+      final notifications = _toMapList(notificationRows);
+
+      debugPrint(
+        '📥 Notification rows loaded: ${notifications.length}',
+      );
+
+      debugPrint('🔔 ===== NOTIFICATION ROWS =====');
+      for (final notification in notifications) {
+        debugPrint(
+          '🔔 ID: ${notification['id']} | '
+          'USER: ${notification['user_id']} | '
+          'ANNOUNCEMENT: ${notification['announcement_id']} | '
+          'READ: ${notification['is_read']} | '
+          'CREATED: ${notification['created_at']}',
+        );
+      }
+      debugPrint('🔔 =============================');
+
+      if (notifications.isEmpty) {
+        debugPrint('📭 No notification rows found.');
+        return const [];
+      }
+
+      // ============================================================
+      // STEP 2: Collect announcement IDs.
+      // ============================================================
+      final announcementIds = <int>{};
+
+      for (final notification in notifications) {
+        final announcementId = _toIntId(notification['announcement_id']);
+        if (announcementId != null) {
+          announcementIds.add(announcementId);
+        }
+      }
+
+      debugPrint(
+        '📢 Announcement IDs found: ${announcementIds.toList()}',
+      );
+
+      if (announcementIds.isEmpty) {
+        return notifications;
+      }
+
+      // ============================================================
+      // STEP 3: Load announcements separately.
+      // ============================================================
+      final announcementRows = await _client
+          .from('announcements')
+          .select(
+            'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
+          )
+          .inFilter('id', announcementIds.toList());
+
+      final announcements = _toMapList(announcementRows);
+
+      debugPrint(
+        '📢 Announcements loaded: ${announcements.length}',
+      );
+
+      debugPrint('📢 ===== ANNOUNCEMENT ROWS =====');
+      for (final announcement in announcements) {
+        debugPrint(
+          '📢 ID: ${announcement['id']} | '
+          'TITLE: ${announcement['title']} | '
+          'PUBLISHED: ${announcement['is_published']} | '
+          'DELETED: ${announcement['deleted_at']} | '
+          'EXPIRES: ${announcement['expires_at']}',
+        );
+      }
+      debugPrint('📢 =============================');
+
+      final announcementMap = <int, Map<String, dynamic>>{};
+
+      for (final announcement in announcements) {
+        final id = _toIntId(announcement['id']);
+        if (id != null) {
+          announcementMap[id] = announcement;
+        }
+      }
+
+      // ============================================================
+      // STEP 4: Attach announcements to notifications.
+      // ============================================================
+      final results = <Map<String, dynamic>>[];
+
+      for (final notification in notifications) {
+        final notificationId = _toIntId(notification['id']);
+        final announcementId = _toIntId(notification['announcement_id']);
+
+        debugPrint(
+          '🔍 Processing notification $notificationId '
+          '→ announcement $announcementId',
+        );
+
+        if (announcementId == null) {
+          debugPrint(
+            '⚠️ Notification $notificationId has no announcement_id.',
+          );
+          final item = Map<String, dynamic>.from(notification);
+          item['announcement'] = <String, dynamic>{
+            'title': 'Announcement',
+            'content': '',
+            'priority': 'medium',
+          };
+          results.add(item);
+          continue;
+        }
+
+        Map<String, dynamic>? announcement = announcementMap[announcementId];
+
+        // Fallback: if the bulk query did not return the announcement,
+        // try fetching that exact announcement by ID.
+        if (announcement == null) {
+          debugPrint(
+            '⚠️ Announcement $announcementId was not returned by bulk query. '
+            'Trying direct lookup...',
+          );
+
+          try {
+            final fallbackRows = await _client
+                .from('announcements')
+                .select(
+                  'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
+                )
+                .eq('id', announcementId)
+                .limit(1);
+
+            final fallbackList = _toMapList(fallbackRows);
+
+            if (fallbackList.isNotEmpty) {
+              announcement = fallbackList.first;
+              debugPrint(
+                '✅ Direct lookup found announcement $announcementId: '
+                '${announcement['title']}',
+              );
+            }
+          } catch (error) {
+            debugPrint(
+              '❌ Direct announcement lookup failed for $announcementId: $error',
+            );
+          }
+        }
+
+        if (announcement == null) {
+          debugPrint(
+            '❌ Announcement $announcementId does not exist or is not readable. '
+            'Using fallback announcement payload.',
+          );
+        }
+
+        // announcement_notifications is the source of truth that the user
+        // received a notification, even if announcement metadata is unreadable.
+        final item = Map<String, dynamic>.from(notification);
+        item['announcement'] = announcement != null
+            ? Map<String, dynamic>.from(announcement)
+            : <String, dynamic>{
+                'title': 'Announcement',
+                'content': '',
+                'priority': 'medium',
+              };
+        results.add(item);
+
+        debugPrint(
+          '✅ ADDED notification $notificationId '
+          '→ announcement $announcementId '
+          '→ "${item['announcement']?['title']}"',
+        );
+      }
+
+      debugPrint(
+        '🎉 Notifications returned to Flutter: ${results.length}',
+      );
+
+      debugPrint('📋 ===== FINAL NOTIFICATIONS =====');
+      for (final item in results) {
+        debugPrint(
+          '📋 Notification ${item['id']} → '
+          'User ${item['user_id']} → '
+          'Announcement ${item['announcement_id']} → '
+          '${item['announcement']?['title']} → '
+          'Read: ${item['is_read']}',
+        );
+      }
+      debugPrint('📋 ================================');
+
+      return results;
+    } on PostgrestException catch (error) {
+      debugPrint(
+        '❌ Notification query failed: ${error.message} (${error.code})',
+      );
+      throw ApiException(
+        'Failed to load notifications: ${error.message}',
+      );
+    } catch (error) {
+      debugPrint(
+        '❌ Failed to load notifications: $error',
+      );
+      throw ApiException(
+        'Failed to load notifications: $error',
+      );
+    }
   }
 
   @override
@@ -713,13 +965,23 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to mark
+      }
+
       await _client
           .from('announcement_notifications')
           .update({
             'is_read': true,
             'read_at': DateTime.now().toIso8601String(),
           })
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to mark notifications read: $error');
     }
@@ -733,6 +995,16 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to mark
+      }
+
       await _client
           .from('announcement_notifications')
           .update({
@@ -740,7 +1012,7 @@ class ApiClient implements AppApiClient {
             'read_at': DateTime.now().toIso8601String(),
           })
           .eq('id', notificationId)
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to mark notification read: $error');
     }
@@ -754,10 +1026,20 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      int? numericUserId = _toIntId(user['id']);
+      if (numericUserId == null) {
+        final employee = await _currentEmployee();
+        numericUserId = _toIntId(employee?['user_id']);
+      }
+
+      if (numericUserId == null) {
+        return; // nothing to clear
+      }
+
       await _client
           .from('announcement_notifications')
           .delete()
-          .eq('user_id', user['id']);
+          .eq('user_id', numericUserId);
     } catch (error) {
       throw ApiException('Failed to clear notifications: $error');
     }
@@ -790,7 +1072,10 @@ class ApiClient implements AppApiClient {
         update['email'] = payload['email'];
       }
       if (update.isNotEmpty) {
-        await _client.from('users').update(update).eq('id', userId);
+        final numericUserId = _toIntId(userId);
+        if (numericUserId != null) {
+          await _client.from('users').update(update).eq('id', numericUserId);
+        }
       }
     }
 
@@ -807,10 +1092,13 @@ class ApiClient implements AppApiClient {
         employeeUpdate['employment_type'] = payload['employment_type'];
       }
       if (employeeUpdate.isNotEmpty) {
-        await _client
-            .from('employees')
-            .update(employeeUpdate)
-            .eq('id', employee['id']);
+        final numericEmployeeId = _toIntId(employee['id']);
+        if (numericEmployeeId != null) {
+          await _client
+              .from('employees')
+              .update(employeeUpdate)
+              .eq('id', numericEmployeeId);
+        }
       }
     }
 
@@ -983,127 +1271,6 @@ class ApiClient implements AppApiClient {
     }
 
     return null;
-  }
-
-  @override
-  Future<void> changePassword({
-    required String currentPassword,
-    required String newPassword,
-  }) async {
-    final current = currentPassword.trim();
-    final next = newPassword.trim();
-
-    if (current.isEmpty || next.isEmpty) {
-      throw ApiException('Current and new passwords are required.');
-    }
-
-    if (next.length < 6) {
-      throw ApiException('New password must be at least 6 characters long.');
-    }
-
-    final user = await _currentUserRow();
-    final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
-        .toString()
-        .trim();
-    if (email.isEmpty) {
-      throw ApiException(
-        'Unable to resolve account email for password change.',
-      );
-    }
-
-    if (_client.auth.currentSession != null) {
-      try {
-        await _client.auth.signInWithPassword(email: email, password: current);
-      } catch (_) {
-        throw ApiException('Current password is incorrect.');
-      }
-
-      try {
-        await _client.auth.updateUser(UserAttributes(password: next));
-      } on AuthException catch (error) {
-        throw ApiException('Password update failed: ${error.message}');
-      }
-
-      // Keep legacy/fallback users-table login in sync with Supabase Auth.
-      final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
-      await _syncUsersPasswordHash(
-        email: email,
-        hashedPassword: hashedPassword,
-        fallbackUserId: user?['id'],
-      );
-      return;
-    }
-
-    if (!_fallbackAuthenticated) {
-      throw ApiException('You are not signed in. Please sign in again.');
-    }
-
-    final rows = await _client
-        .from('users')
-        .select('id,password,must_change_password')
-        .ilike('email', email)
-        .limit(1);
-
-    if (rows.isEmpty) {
-      throw ApiException('Account record not found for password change.');
-    }
-
-    final row = (rows.first as Map).cast<String, dynamic>();
-    final storedPassword = (row['password'] ?? '').toString();
-    final isBcrypt = storedPassword.startsWith(r'$2');
-    final isValid = isBcrypt
-        ? BCrypt.checkpw(current, storedPassword)
-        : current == storedPassword;
-
-    if (!isValid) {
-      throw ApiException('Current password is incorrect.');
-    }
-
-    final hashedPassword = BCrypt.hashpw(next, BCrypt.gensalt());
-    await _client
-        .from('users')
-        .update({'password': hashedPassword, 'must_change_password': false})
-        .eq('id', row['id']);
-
-    await _loadCurrentUserFromTable(email);
-  }
-
-  Future<void> _syncUsersPasswordHash({
-    required String email,
-    required String hashedPassword,
-    dynamic fallbackUserId,
-  }) async {
-    final payload = {'password': hashedPassword, 'must_change_password': false};
-
-    try {
-      final byEmail = await _client
-          .from('users')
-          .update(payload)
-          .ilike('email', email)
-          .select('id');
-      if (_toMapList(byEmail).isNotEmpty) {
-        await _loadCurrentUserFromTable(email);
-        return;
-      }
-    } catch (_) {
-      // Fall back to ID update below.
-    }
-
-    if (fallbackUserId != null) {
-      final byId = await _client
-          .from('users')
-          .update(payload)
-          .eq('id', fallbackUserId)
-          .select('id');
-      if (_toMapList(byId).isNotEmpty) {
-        await _loadCurrentUserFromTable(email);
-        return;
-      }
-    }
-
-    throw ApiException(
-      'Password changed in Auth, but failed to sync users-table password record.',
-    );
   }
 
   @override
@@ -1456,7 +1623,10 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final employeeId = employee['id'];
+    final employeeId = _toIntId(employee['id']);
+    if (employeeId == null) {
+      throw ApiException('Employee profile not found.');
+    }
 
     try {
       final rows = await _client
@@ -1603,10 +1773,17 @@ class ApiClient implements AppApiClient {
     }
 
     try {
+      final numericEmployeeId = _toIntId(employee['id']);
+      if (numericEmployeeId == null) {
+        throw ApiException(
+          'Employee profile not found while saving profile photo path.',
+        );
+      }
+
       await _client
           .from('employees')
           .update({'profilephoto_path': path})
-          .eq('id', employee['id']);
+          .eq('id', numericEmployeeId);
     } on PostgrestException catch (error) {
       throw ApiException(
         'Profile photo uploaded, but failed to save employees.profilephoto_path: ${error.message}',
@@ -1646,6 +1823,45 @@ class ApiClient implements AppApiClient {
     };
   }
 
+  Future<void> _provisionAuthUserIfMissing({
+    required String email,
+    required String password,
+    required dynamic employeeId,
+  }) async {
+    try {
+      final authResult = await _client.auth.signUp(
+        email: email,
+        password: password,
+      );
+
+      final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
+      if (authUserId == null || authUserId.trim().isEmpty) {
+        return;
+      }
+
+      await _syncEmployeeAuthId(
+        employeeId: employeeId,
+        authUserId: authUserId,
+      );
+    } catch (_) {
+      // If the auth account already exists or signup is disabled, keep login working.
+    }
+  }
+
+  Future<void> _syncEmployeeAuthId({
+    required dynamic employeeId,
+    required String authUserId,
+  }) async {
+    try {
+      await _client
+          .from('employees')
+          .update({'auth_id': authUserId})
+          .eq('id', employeeId);
+    } catch (_) {
+      // Keep login working even if auth_id sync fails.
+    }
+  }
+
   Future<Map<String, dynamic>?> _currentUserRow() async {
     if (_user != null) {
       return _user;
@@ -1661,11 +1877,37 @@ class ApiClient implements AppApiClient {
   }
 
   Future<Map<String, dynamic>?> _currentEmployee() async {
+    final authUserId = _client.auth.currentUser?.id.trim() ?? '';
     final user = await _currentUserRow();
     final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
         .toString()
         .trim();
     final userId = (user?['id'] ?? '').toString().trim();
+    final userEmployeeId = (user?['employee_id'] ?? '').toString().trim();
+    final userAuthId = (user?['auth_id'] ?? '').toString().trim();
+
+    final employeeIdCandidates = <String>{
+      if (userId.isNotEmpty) userId,
+      if (authUserId.isNotEmpty) authUserId,
+      if (userEmployeeId.isNotEmpty) userEmployeeId,
+      if (userAuthId.isNotEmpty) userAuthId,
+    }.toList();
+
+    Future<List<Map<String, dynamic>>> fetchByAuthId() async {
+      if (authUserId.isEmpty) {
+        return const [];
+      }
+      try {
+        final rows = await _client
+            .from('employees')
+            .select('*')
+            .eq('auth_id', authUserId)
+            .limit(1);
+        return _toMapList(rows);
+      } catch (_) {
+        return const [];
+      }
+    }
 
     Future<List<Map<String, dynamic>>> fetchByEmail() async {
       if (email.isEmpty) {
@@ -1684,14 +1926,27 @@ class ApiClient implements AppApiClient {
     }
 
     Future<List<Map<String, dynamic>>> fetchByUserId() async {
-      if (userId.isEmpty) {
+      if (employeeIdCandidates.isEmpty) {
         return const [];
       }
       try {
+        // `employees.user_id` is typically a numeric (bigint) column.
+        // Filter the candidate list to numeric values only to avoid
+        // Postgres errors like "invalid input syntax for type bigint"
+        // when auth UIDs (UUID strings) are present.
+        final numericCandidates = employeeIdCandidates
+            .where((c) => int.tryParse(c.toString().trim()) != null)
+            .map((c) => int.parse(c.toString().trim()))
+            .toList();
+
+        if (numericCandidates.isEmpty) {
+          return const [];
+        }
+
         final rows = await _client
             .from('employees')
             .select('*')
-            .eq('user_id', userId)
+            .inFilter('user_id', numericCandidates)
             .limit(1);
         return _toMapList(rows);
       } catch (_) {
@@ -1699,7 +1954,10 @@ class ApiClient implements AppApiClient {
       }
     }
 
-    var list = await fetchByEmail();
+    var list = await fetchByAuthId();
+    if (list.isEmpty) {
+      list = await fetchByEmail();
+    }
     if (list.isEmpty) {
       list = await fetchByUserId();
     }
@@ -1717,6 +1975,22 @@ class ApiClient implements AppApiClient {
       final departments = _toMapList(deptRows);
       if (departments.isNotEmpty) {
         employee['department'] = departments.first;
+      }
+    }
+
+    // If we've resolved an employee row, prefer using the employee's name
+    // as the display name for the current user when the user record lacks
+    // a friendly `name` (for example when reading from auth metadata).
+    if (_user != null) {
+      final currentUserName = (_user?['name'] ?? '').toString();
+      final userEmail = (_user?['email'] ?? '').toString();
+      if (currentUserName.isEmpty || currentUserName == userEmail) {
+        final empName = (employee['name'] ?? employee['full_name'] ?? '')
+            .toString()
+            .trim();
+        if (empName.isNotEmpty) {
+          _user!['name'] = empName;
+        }
       }
     }
 
@@ -1738,6 +2012,11 @@ class ApiClient implements AppApiClient {
       return value;
     }
     return int.tryParse(value?.toString() ?? '');
+  }
+
+  int? _toIntId(dynamic value) {
+    if (value == null) return null;
+    return int.tryParse(value.toString().trim());
   }
 
   List<dynamic> _employeeCredentialIdentifiers(Map<String, dynamic> employee) {
@@ -1773,12 +2052,22 @@ class ApiClient implements AppApiClient {
       return const [];
     }
 
+    // Ensure we only pass numeric identifiers to employee_id (bigint).
+    final numericIdentifiers = employeeIdentifiers
+        .where((c) => int.tryParse(c.toString().trim()) != null)
+        .map((c) => int.parse(c.toString().trim()))
+        .toList();
+
+    if (numericIdentifiers.isEmpty) {
+      return const [];
+    }
+
     dynamic query = _client.from('employee_credentials').select(select);
 
-    if (employeeIdentifiers.length == 1) {
-      query = query.eq('employee_id', employeeIdentifiers.first);
+    if (numericIdentifiers.length == 1) {
+      query = query.eq('employee_id', numericIdentifiers.first);
     } else {
-      query = query.inFilter('employee_id', employeeIdentifiers);
+      query = query.inFilter('employee_id', numericIdentifiers);
     }
 
     if (orderByCreatedAtDesc) {
@@ -1787,6 +2076,7 @@ class ApiClient implements AppApiClient {
 
     return query;
   }
+
 }
 
 class ApiException implements Exception {

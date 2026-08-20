@@ -1,13 +1,15 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'file_viewer_screen.dart';
 // import 'package:flutter/services.dart'; // removed - unnecessary import
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
+import 'credential_upload_screen.dart';
 
 class CredentialsScreen extends ConsumerStatefulWidget {
   const CredentialsScreen({
@@ -28,6 +30,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _credentials = const [];
+  int _lastRefreshToken = -1;
 
   final List<String> tabs = const [
     'All',
@@ -40,6 +43,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
   @override
   void initState() {
     super.initState();
+    _lastRefreshToken = ref.read(appRefreshProvider);
     _loadCredentials();
   }
 
@@ -78,6 +82,17 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  void _syncRefreshToken(int refreshToken) {
+    if (_lastRefreshToken == refreshToken) {
+      return;
+    }
+
+    _lastRefreshToken = refreshToken;
+    _isLoading = true;
+    _error = null;
+    _loadCredentials();
   }
 
   List<Map<String, dynamic>> get _filteredCredentials {
@@ -412,6 +427,18 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     return path.substring(dot + 1);
   }
 
+  void _openUploadScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CredentialUploadScreen(
+          onNavigate: widget.onNavigate,
+          onSubmitted: _loadCredentials,
+        ),
+      ),
+    );
+  }
+
   Future<void> _viewFile(Map<String, dynamic> item) async {
     final stored = (item['file_path'] ?? '').toString();
     if (stored.isEmpty) {
@@ -480,8 +507,10 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () async {
                       try {
-                        await launchUrl(Uri.parse(url),
-                            mode: LaunchMode.externalApplication);
+                        await launchUrl(
+                          Uri.parse(url),
+                          mode: LaunchMode.externalApplication,
+                        );
                         if (context.mounted) Navigator.pop(context);
                       } catch (_) {
                         if (!context.mounted) return;
@@ -489,7 +518,9 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           context: context,
                           builder: (_) => AlertDialog(
                             title: const Text('Open File'),
-                            content: SelectableText('Unable to open file directly. URL:\n$url'),
+                            content: SelectableText(
+                              'Unable to open file directly. URL:\n$url',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(context),
@@ -562,8 +593,65 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     }
   }
 
+  Future<void> _confirmDeleteCredential(Map<String, dynamic> item) async {
+    final confirmed = await showDialog<bool?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete credential'),
+        content: const Text(
+          'Are you sure you want to delete this credential? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final id = item['id'];
+      final filePath = (item['file_path'] ?? '').toString();
+      final api = ref.read(apiClientProvider);
+      await api.deleteEmployeeCredential(
+        id: id,
+        filePath: filePath.isEmpty ? null : filePath,
+      );
+
+      // Reload from server and verify row is actually gone to avoid false success.
+      await _loadCredentials();
+      final stillExists = _credentials.any((c) => c['id'] == id);
+      if (stillExists) {
+        throw Exception(
+          'Delete did not apply on server. Your account may not have DELETE permission for this credential.',
+        );
+      }
+
+      ref.read(appRefreshProvider.notifier).trigger();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Credential deleted.')));
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete credential: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final refreshToken = ref.watch(appRefreshProvider);
+    _syncRefreshToken(refreshToken);
+
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.credentials,
@@ -624,7 +712,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           child: Padding(
                             padding: EdgeInsets.only(top: 8),
                             child: Text(
-                              'View your credential status, expiration dates, and HR review updates.',
+                              'Upload and manage your credentials.\nHR will review and verify submissions.',
                               style: TextStyle(
                                 color: Color(0xFF4B556A),
                                 fontSize: 16,
@@ -636,7 +724,28 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    if (!isMobile) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: ElevatedButton(
+                          onPressed: _openUploadScreen,
+                          child: const Text(
+                            'Upload New',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2B2F36),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
@@ -655,7 +764,8 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                               ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(999),
-                                onTap: () => setState(() => selectedTab = index),
+                                onTap: () =>
+                                    setState(() => selectedTab = index),
                                 child: AnimatedContainer(
                                   duration: const Duration(milliseconds: 180),
                                   padding: const EdgeInsets.symmetric(
@@ -705,7 +815,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                           border: Border.all(color: const Color(0xFFE6ECF6)),
                         ),
                         child: const Text(
-                          'No credentials found.\nCredential records will appear here once available.',
+                          'No credentials found.\nUpload your first credential above.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Color(0xFF92A0B5),
@@ -768,7 +878,8 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           title,
@@ -805,8 +916,10 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                       if (expiryBadgeStyle != null)
                                         _BadgePill(
                                           label: expiryBadgeStyle.label,
-                                          background: expiryBadgeStyle.background,
-                                          foreground: expiryBadgeStyle.foreground,
+                                          background:
+                                              expiryBadgeStyle.background,
+                                          foreground:
+                                              expiryBadgeStyle.foreground,
                                         ),
                                     ],
                                   ),
@@ -855,6 +968,15 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                     onPressed: () => _viewFile(item),
                                     icon: Icons.visibility_outlined,
                                     label: 'View',
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _CardActionButton(
+                                    onPressed: () =>
+                                        _confirmDeleteCredential(item),
+                                    icon: Icons.delete_outline,
+                                    label: 'Delete',
+                                    foreground: const Color(0xFFB3261E),
+                                    borderColor: const Color(0xFFF1CBD1),
                                   ),
                                 ],
                               ),

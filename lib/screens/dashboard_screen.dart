@@ -7,9 +7,9 @@ import '../navigation/app_nav.dart';
 import '../providers/academic_calendar_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/nuhris_app_bar.dart';
 import '../widgets/dashboard_calendar.dart';
 import '../providers/dashboard_provider.dart';
-import '../widgets/nuhris_app_bar.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({
@@ -136,6 +136,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final complianceValue =
         '${compliantCount.toInt()}/${totalCredentialCount.toInt()}';
+    final hasExpiringCredentials = expiringSoonCount.toInt() > 0;
     final metrics = [
       _MetricData(
         title: 'Active Credentials',
@@ -196,6 +197,64 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           );
 
           final complianceTitleSize = constraints.maxWidth >= 900 ? 36.0 : 28.0;
+          final expiryReminder = hasExpiringCredentials
+              ? Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E6),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFF4D36B)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFE8B3),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.notification_important_outlined,
+                          color: Color(0xFF9A6700),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'You have ${expiringSoonCount.toInt()} approved credential${expiringSoonCount.toInt() == 1 ? '' : 's'} expiring soon.',
+                              style: const TextStyle(
+                                color: Color(0xFF7A5200),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                                height: 1.25,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Please visit your credentials list to review and re-upload the affected document(s) if needed.',
+                              style: TextStyle(
+                                color: Color(0xFF8C6400),
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink();
 
           final compliancePanel = Card(
             child: Padding(
@@ -469,6 +528,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                if (hasExpiringCredentials)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: horizontalPad),
+                    child: expiryReminder,
+                  ),
+                if (hasExpiringCredentials) const SizedBox(height: 10),
                 Padding(
                   padding: EdgeInsets.symmetric(horizontal: horizontalPad),
                   child: metricsGrid,
@@ -510,6 +575,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   style: TextStyle(color: AppColors.mutedText, fontSize: 22),
                 ),
                 const SizedBox(height: 14),
+                if (hasExpiringCredentials) expiryReminder,
+                if (hasExpiringCredentials) const SizedBox(height: 14),
                 metricsGrid,
                 const SizedBox(height: 14),
                 Row(

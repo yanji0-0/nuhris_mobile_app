@@ -22,23 +22,19 @@ class AppDrawer extends ConsumerWidget {
 
     return accountAsync.when(
       data: (account) {
-        final user =
-            (account['user'] as Map?)?.cast<String, dynamic>() ??
+        final user = (account['user'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{};
-        final employee =
-            (account['employee'] as Map?)?.cast<String, dynamic>() ??
+        final employee = (account['employee'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{};
 
         final firstName = (employee['first_name'] ?? '').toString().trim();
         final lastName = (employee['last_name'] ?? '').toString().trim();
-        final fullName = [
-          lastName,
-          firstName,
-        ].where((part) => part.isNotEmpty).join(', ');
+        final fullName = [lastName, firstName]
+            .where((part) => part.isNotEmpty)
+            .join(', ');
         final displayName = fullName.isNotEmpty
             ? fullName
             : (user['name'] ?? 'Employee').toString();
-
         final email = (employee['email'] ?? user['email'] ?? '').toString();
 
         return Drawer(
@@ -79,6 +75,12 @@ class AppDrawer extends ConsumerWidget {
                         label: 'Attendance & DTR',
                         selected: selected == AppNavItem.attendanceDtr,
                         onTap: () => onSelect(AppNavItem.attendanceDtr),
+                      ),
+                      _DrawerItem(
+                        icon: Icons.home_work_outlined,
+                        label: 'WFH Monitoring',
+                        selected: selected == AppNavItem.wfhMonitoring,
+                        onTap: () => onSelect(AppNavItem.wfhMonitoring),
                       ),
                       _DrawerItem(
                         icon: Icons.event_note_outlined,
@@ -162,7 +164,7 @@ class AppDrawer extends ConsumerWidget {
   }
 }
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   const _Header({
     required this.displayName,
     required this.email,
@@ -174,7 +176,9 @@ class _Header extends StatelessWidget {
   final String employeeInitials;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profilePhotoAsync = ref.watch(profilePhotoProvider);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
@@ -252,15 +256,42 @@ class _Header extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppColors.employeeAvatarBackground,
-                  child: Text(
-                    employeeInitials,
-                    style: const TextStyle(
-                      color: AppColors.employeeAvatarForeground,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
+                profilePhotoAsync.when(
+                  data: (photoUrl) {
+                    final hasPhoto =
+                        photoUrl != null && photoUrl.trim().isNotEmpty;
+                    return CircleAvatar(
+                      radius: 16,
+                      backgroundColor: AppColors.employeeAvatarBackground,
+                      backgroundImage:
+                          hasPhoto ? NetworkImage(photoUrl.trim()) : null,
+                      child: !hasPhoto
+                          ? Text(
+                              employeeInitials,
+                              style: const TextStyle(
+                                color: AppColors.employeeAvatarForeground,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                              ),
+                            )
+                          : null,
+                    );
+                  },
+                  loading: () => CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.employeeAvatarBackground,
+                    child: const SizedBox.shrink(),
+                  ),
+                  error: (_, _) => CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.employeeAvatarBackground,
+                    child: Text(
+                      employeeInitials,
+                      style: const TextStyle(
+                        color: AppColors.employeeAvatarForeground,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ),

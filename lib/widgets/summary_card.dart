@@ -9,6 +9,7 @@ class SummaryCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.iconColor,
+    this.initials,
   });
 
   final String title;
@@ -16,6 +17,7 @@ class SummaryCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final Color iconColor;
+  final String? initials;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +45,17 @@ class SummaryCard extends StatelessWidget {
                 color: iconColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: iconColor),
+              child: initials == null || initials!.trim().isEmpty
+                  ? Icon(icon, color: iconColor)
+                  : Center(
+                      child: Text(
+                        initials!.trim().toUpperCase(),
+                        style: TextStyle(
+                          color: iconColor,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
             )
           ],
         ),

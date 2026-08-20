@@ -16,6 +16,8 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
     required this.onNavigate,
     required this.onSignOut,
     this.showNotifications = true,
+    this.backgroundColor = AppColors.appBarNavy,
+    this.foregroundColor = Colors.white,
   });
 
   final String title;
@@ -23,6 +25,8 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
   final ValueChanged<AppNavItem> onNavigate;
   final VoidCallback onSignOut;
   final bool showNotifications;
+  final Color backgroundColor;
+  final Color foregroundColor;
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
@@ -30,15 +34,16 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final accountAsync = ref.watch(accountProvider);
+    final profileAsync = ref.watch(profilePhotoProvider);
     final initials = accountAsync.maybeWhen(
       data: employeeInitialsFromAccount,
       orElse: () => 'E',
     );
 
     return AppBar(
-      backgroundColor: AppColors.appBarNavy,
-      foregroundColor: Colors.white,
-      surfaceTintColor: AppColors.appBarNavy,
+      backgroundColor: backgroundColor,
+      foregroundColor: foregroundColor,
+      surfaceTintColor: backgroundColor,
       elevation: 0,
       shadowColor: Colors.transparent,
       scrolledUnderElevation: 0,
@@ -80,7 +85,10 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
               PopupMenuItem<_AccountMenuAction>(
                 value: _AccountMenuAction.account,
                 enabled: currentItem != AppNavItem.account,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 2,
+                ),
                 child: Row(
                   children: [
                     Icon(
@@ -107,7 +115,10 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
               const PopupMenuDivider(height: 1),
               PopupMenuItem<_AccountMenuAction>(
                 value: _AccountMenuAction.signOut,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 2,
+                ),
                 child: Row(
                   children: [
                     const Icon(
@@ -128,31 +139,66 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
                 ),
               ),
             ],
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppColors.employeeAvatarBackground,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.35),
-                  width: 1,
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: AppColors.employeeAvatarForeground,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.2,
-                ),
-              ),
+            child: _AppBarAvatar(
+              initials: initials,
+              profileAsync: profileAsync,
+              foregroundColor: foregroundColor,
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AppBarAvatar extends StatelessWidget {
+  const _AppBarAvatar({
+    required this.initials,
+    required this.profileAsync,
+    required this.foregroundColor,
+  });
+
+  final String initials;
+  final AsyncValue<String?> profileAsync;
+  final Color foregroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final photoUrl = profileAsync.maybeWhen(
+      data: (url) => url,
+      orElse: () => null,
+    );
+    final hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
+
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: AppColors.employeeAvatarBackground,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.35),
+          width: 1,
+        ),
+        image: hasPhoto
+            ? DecorationImage(
+                image: NetworkImage(photoUrl.trim()),
+                fit: BoxFit.cover,
+              )
+            : null,
+      ),
+      alignment: Alignment.center,
+      child: hasPhoto
+          ? null
+          : Text(
+              initials,
+              style: TextStyle(
+                color: foregroundColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+              ),
+            ),
     );
   }
 }

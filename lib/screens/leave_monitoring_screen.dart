@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
+import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
@@ -24,15 +25,33 @@ class LeaveMonitoringScreen extends ConsumerStatefulWidget {
 
 class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
   late Future<Map<String, dynamic>> _future;
+  int _lastRefreshToken = -1;
 
   @override
   void initState() {
     super.initState();
-    _future = ref.read(apiClientProvider).getLeaveMonitoring();
+    _lastRefreshToken = ref.read(appRefreshProvider);
+    _future = _loadLeaveMonitoring();
+  }
+
+  Future<Map<String, dynamic>> _loadLeaveMonitoring() {
+    return ref.read(apiClientProvider).getLeaveMonitoring();
+  }
+
+  void _syncRefreshToken(int refreshToken) {
+    if (_lastRefreshToken == refreshToken) {
+      return;
+    }
+
+    _lastRefreshToken = refreshToken;
+    _future = _loadLeaveMonitoring();
   }
 
   @override
   Widget build(BuildContext context) {
+    final refreshToken = ref.watch(appRefreshProvider);
+    _syncRefreshToken(refreshToken);
+
     return Scaffold(
       drawer: AppDrawer(
         selected: AppNavItem.leaveMonitoring,
@@ -68,18 +87,23 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           }
 
           final payload = snapshot.data ?? {};
-          final balances = ((payload['balances'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList()
-            ..sort(_compareNewestFirst);
-          final requests = ((payload['requests'] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => e.cast<String, dynamic>())
-              .toList()
-            ..sort(_compareNewestFirst);
+          final balances =
+              ((payload['balances'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => e.cast<String, dynamic>())
+                  .toList()
+                ..sort(_compareNewestFirst);
+          final requests =
+              ((payload['requests'] as List?) ?? const [])
+                  .whereType<Map>()
+                  .map((e) => e.cast<String, dynamic>())
+                  .toList()
+                ..sort(_compareNewestFirst);
           final usageSummary = _buildLeaveUsageSummary(requests);
-          final breakdown = _buildLeaveUsageBreakdown(requests);
+          final remainingBalances = _buildRemainingBalanceSummary(
+            balances,
+            requests,
+          );
 
           return Container(
             decoration: const BoxDecoration(
@@ -99,7 +123,7 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
                 children: [
                   const Text(
-                    'View your leave balances and history (read-only).',
+                    'View your leave balances and history. Leave data is managed by HR (read-only).',
                     style: TextStyle(
                       color: AppColors.mutedText,
                       fontSize: 13,
@@ -109,9 +133,11 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                   const SizedBox(height: 10),
                   _LeaveUsageSummaryPanel(usageSummary: usageSummary),
                   const SizedBox(height: 12),
-                  _BalancePanel(balances: balances),
+                  _RemainingBalanceSection(balances: remainingBalances),
                   const SizedBox(height: 12),
-                  _LeaveUsageBreakdownPanel(breakdown: breakdown),
+                  _LeaveUsageBreakdownPanel(
+                    breakdown: _buildLeaveUsageBreakdown(requests),
+                  ),
                   const SizedBox(height: 12),
                   const Text(
                     'Leave History',
@@ -336,6 +362,59 @@ Map<String, List<Map<String, dynamic>>> _buildLeaveUsageBreakdown(
   };
 }
 
+Map<String, Map<String, dynamic>> _buildRemainingBalanceSummary(
+  List<Map<String, dynamic>> balances,
+  List<Map<String, dynamic>> requests,
+) {
+  final totalByType = <String, double>{};
+
+  for (final request in requests) {
+    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
+      continue;
+    }
+
+    final leaveType = _normalizedLeaveType(
+      (request['leave_type'] ?? '').toString(),
+    );
+    final daysUsed = _toDouble(request['days_deducted']);
+
+    if (leaveType.contains('vacation')) {
+      totalByType['vacation'] = (totalByType['vacation'] ?? 0) + daysUsed;
+    } else if (leaveType.contains('sick')) {
+      totalByType['sick'] = (totalByType['sick'] ?? 0) + daysUsed;
+    } else if (leaveType.contains('emergency')) {
+      totalByType['emergency'] = (totalByType['emergency'] ?? 0) + daysUsed;
+    }
+  }
+
+  final result = <String, Map<String, dynamic>>{};
+
+  for (final type in const ['emergency', 'sick', 'vacation']) {
+    final balanceRow = balances.cast<Map<String, dynamic>>().firstWhere(
+      (row) => _normalizedLeaveType(
+        (row['leave_type'] ?? '').toString(),
+      ).contains(type),
+      orElse: () => <String, dynamic>{
+        'leave_type': '${type[0].toUpperCase()}${type.substring(1)} Leave',
+        'remaining_days': 0,
+      },
+    );
+
+    final label = (balanceRow['leave_type'] ?? '').toString();
+    final remainingDays = _remainingDays(balanceRow['remaining_days']);
+
+    result[type] = {
+      'label': label.isEmpty
+          ? '${type[0].toUpperCase()}${type.substring(1)} Leave'
+          : label,
+      'remaining_days': remainingDays,
+      'used_days': _formatDaysUsed(totalByType[type] ?? 0),
+    };
+  }
+
+  return result;
+}
+
 String _formatDaysUsed(dynamic value) {
   final days = _toDouble(value);
   if (days == days.roundToDouble()) {
@@ -364,109 +443,8 @@ DateTime _parseNewestDate(Map<String, dynamic> item) {
   return DateTime.fromMillisecondsSinceEpoch(0);
 }
 
-int _compareNewestFirst(
-  Map<String, dynamic> left,
-  Map<String, dynamic> right,
-) {
+int _compareNewestFirst(Map<String, dynamic> left, Map<String, dynamic> right) {
   return _parseNewestDate(right).compareTo(_parseNewestDate(left));
-}
-
-class _BalancePanel extends StatelessWidget {
-  const _BalancePanel({required this.balances});
-
-  final List<Map<String, dynamic>> balances;
-
-  @override
-  Widget build(BuildContext context) {
-    if (balances.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF6F8FE),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFCAD7F7)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(
-              Icons.info_outline_rounded,
-              size: 16,
-              color: Color(0xFF4D79F0),
-            ),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                'No leave balance data available yet.',
-                style: TextStyle(
-                  color: Color(0xFF2A4EA8),
-                  fontSize: 12,
-                  height: 1.3,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: balances.take(4).map((balance) {
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE6EAF3)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF1FF),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.beach_access_rounded,
-                  color: Color(0xFF2852C7),
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      (balance['leave_type'] ?? 'Leave').toString(),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_remainingDays(balance['remaining_days'])} remaining',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.mutedText,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
 }
 
 class _LeaveUsageSummaryPanel extends StatelessWidget {
@@ -569,6 +547,123 @@ class _UsageSummaryCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
               fontSize: 20,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RemainingBalanceSection extends StatelessWidget {
+  const _RemainingBalanceSection({required this.balances});
+
+  final Map<String, Map<String, dynamic>> balances;
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _RemainingBalanceCard(
+        label: (balances['emergency']?['label'] ?? 'Emergency Leave')
+            .toString(),
+        value: (balances['emergency']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF2B57D1),
+      ),
+      _RemainingBalanceCard(
+        label: (balances['sick']?['label'] ?? 'Sick Leave').toString(),
+        value: (balances['sick']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF1D4ED8),
+      ),
+      _RemainingBalanceCard(
+        label: (balances['vacation']?['label'] ?? 'Vacation Leave').toString(),
+        value: (balances['vacation']?['remaining_days'] ?? '0').toString(),
+        accent: const Color(0xFF1E40AF),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Remaining Leave Balance',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF111827),
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 620 ? 3 : 1;
+            return GridView.count(
+              crossAxisCount: columns,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: columns == 3 ? 1.18 : 2.7,
+              children: cards,
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _RemainingBalanceCard extends StatelessWidget {
+  const _RemainingBalanceCard({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.18), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D1F2937),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: accent.withValues(alpha: 0.88),
+              fontWeight: FontWeight.w500,
+              fontSize: 13.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: TextStyle(
+              color: const Color(0xFF1E2B6C),
+              fontWeight: FontWeight.w800,
+              fontSize: 32,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Remaining days',
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 12.5),
           ),
         ],
       ),
