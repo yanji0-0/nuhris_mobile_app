@@ -1,7 +1,6 @@
 enum AppNavItem {
   dashboard,
   academicCalendar,
-  credentials,
   attendanceDtr,
   wfhMonitoring,
   leaveMonitoring,
@@ -15,8 +14,6 @@ String navTitle(AppNavItem item) {
       return 'Dashboard';
     case AppNavItem.academicCalendar:
       return 'Academic Calendar';
-    case AppNavItem.credentials:
-      return 'Credentials';
     case AppNavItem.attendanceDtr:
       return 'Attendance & DTR';
     case AppNavItem.wfhMonitoring:
@@ -26,6 +23,6 @@ String navTitle(AppNavItem item) {
     case AppNavItem.notifications:
       return 'Notifications';
     case AppNavItem.account:
-      return 'Account';
+      return 'Profile';
   }
 }

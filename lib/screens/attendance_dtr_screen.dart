@@ -413,6 +413,10 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
                                                         _displayStatus(record),
                                                         flex: 2,
                                                         isStatus: true,
+                                                        statusNote:
+                                                            _displayScheduleNote(
+                                                              record,
+                                                            ),
                                                       ),
                                                     ],
                                                   ),
@@ -521,6 +525,18 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
   }
 
   String _formatSchedule(Map<String, dynamic> record) {
+    final scheduleStatus = (record['schedule_status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (scheduleStatus == 'academic_working_day' ||
+        scheduleStatus == 'academic working day') {
+      return 'Academic working day';
+    }
+    if (scheduleStatus == 'no_schedule' || scheduleStatus == 'no schedule') {
+      return 'No schedule';
+    }
+
     final inText = _formatTime(record['scheduled_time_in']);
     final outText = _formatTime(record['scheduled_time_out']);
     if (inText == '--' || outText == '--') {
@@ -535,13 +551,11 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
         .toString()
         .trim()
         .toLowerCase();
-    final noSchedule = _isNoScheduleRecord(record);
-
     if (scheduleStatus == 'rejected' || scheduleStatus == 'declined') {
       return 'Declined';
     }
 
-    if (noSchedule) {
+    if (scheduleStatus == 'no_schedule' || scheduleStatus == 'no schedule') {
       return 'No schedule';
     }
 
@@ -564,24 +578,12 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
         .join(' ');
   }
 
-  bool _isNoScheduleRecord(Map<String, dynamic> record) {
-    final scheduleStatus = (record['schedule_status'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-
-    if (scheduleStatus == 'no_schedule' ||
-        scheduleStatus == 'no schedule' ||
-        scheduleStatus == 'none' ||
-        scheduleStatus == 'pending' ||
-        scheduleStatus == 'draft' ||
-        scheduleStatus == 'invalid') {
-      return true;
+  String? _displayScheduleNote(Map<String, dynamic> record) {
+    final note = (record['schedule_notes'] ?? '').toString().trim();
+    if (note.isEmpty || note.toLowerCase() == 'null') {
+      return null;
     }
-
-    final inText = _formatTime(record['scheduled_time_in']);
-    final outText = _formatTime(record['scheduled_time_out']);
-    return inText == '--' && outText == '--';
+    return note;
   }
 }
 
@@ -685,11 +687,17 @@ class _HeadCell extends StatelessWidget {
 }
 
 class _BodyCell extends StatelessWidget {
-  const _BodyCell(this.text, {required this.flex, this.isStatus = false});
+  const _BodyCell(
+    this.text, {
+    required this.flex,
+    this.isStatus = false,
+    this.statusNote,
+  });
 
   final String text;
   final int flex;
   final bool isStatus;
+  final String? statusNote;
 
   @override
   Widget build(BuildContext context) {
@@ -734,24 +742,41 @@ class _BodyCell extends StatelessWidget {
     return Expanded(
       flex: flex,
       child: isStatus
-          ? Align(
-              alignment: Alignment.center,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: statusBg(text),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  text,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: statusFg(text),
-                    fontWeight: FontWeight.w700,
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusBg(text),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    text,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: statusFg(text),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
+                if ((statusNote ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    statusNote!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
             )
           : Text(
               text,

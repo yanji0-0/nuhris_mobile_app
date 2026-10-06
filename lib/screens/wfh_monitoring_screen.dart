@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'file_viewer_screen.dart';
 import '../navigation/app_nav.dart';
 import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
@@ -143,137 +142,37 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
     return const Color(0xFF6B7280);
   }
 
-  Future<void> _viewFile(String? filePath) async {
-    final stored = (filePath ?? '').toString();
-    if (stored.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No file attached to this submission.')),
+  /// Mirrors the web WFH page: "View link" opens the submission's
+  /// `monitoring_link` in a new browser tab / external browser. It is a web
+  /// link, not a stored file, so it never goes through the PDF viewer.
+  Future<void> _viewLink(dynamic monitoringLink) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final link = (monitoringLink ?? '').toString().trim();
+    if (link.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('No monitoring link attached to this submission.'),
+        ),
       );
       return;
     }
 
-    try {
-      final api = ref.read(apiClientProvider);
-      final url = await api.getCredentialFileUrl(stored);
-      if (url == null || url.isEmpty) {
-        if (!context.mounted) return;
-
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('File Not Found'),
-            content: const Text(
-              'The file for this submission could not be found.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
-
-      // Signed URLs include ?token=... — detect type from path, not the full URL.
-      final pathLower = (Uri.tryParse(url)?.path ?? url).toLowerCase();
-      final isImage = pathLower.endsWith('.png') ||
-          pathLower.endsWith('.jpg') ||
-          pathLower.endsWith('.jpeg') ||
-          pathLower.endsWith('.gif') ||
-          pathLower.endsWith('.webp');
-      final isPdf = pathLower.endsWith('.pdf');
-
-      if (isImage) {
-        if (!context.mounted) return;
-        showDialog(
-          context: context,
-          builder: (_) => Dialog(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(
-                  child: InteractiveViewer(
-                    child: Image.network(
-                      url,
-                      fit: BoxFit.contain,
-                      errorBuilder: (ctx, err, stack) =>
-                          Center(child: Text('Unable to load image:\n$err')),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      if (await canLaunchUrl(Uri.parse(url))) {
-                        await launchUrl(
-                          Uri.parse(url),
-                          mode: LaunchMode.externalApplication,
-                        );
-                        if (context.mounted) Navigator.pop(context);
-                      }
-                    },
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open in Browser'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        return;
-      }
-
-      // For PDFs, show in-app viewer; for other docs, try external open and fallback to showing URL.
-      if (isPdf) {
-        if (!context.mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => FileViewerScreen(url: url, title: 'Document'),
-          ),
-        );
-        return;
-      }
-
-      // If URL is HTTP(S), prefer in-app viewer (WebView) for better UX on mobile.
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        if (!context.mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => FileViewerScreen(url: url, title: 'Document'),
-          ),
-        );
-        return;
-      }
-
-      // Last resort: try to open externally and show URL dialog on failure.
+    final uri = Uri.tryParse(link);
+    final isWebLink =
+        uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+    var opened = false;
+    if (isWebLink) {
       try {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      } catch (e) {
-        if (!context.mounted) return;
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Open File'),
-            content: SelectableText('Unable to open file directly. URL:\n$url'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
+        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (error) {
+        debugPrint('WFH monitoring link failed to open: $error');
       }
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to open file: $error')));
+    }
+
+    if (!opened) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Unable to open the monitoring link.')),
+      );
     }
   }
 
@@ -537,9 +436,9 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                                     alignment: Alignment.centerRight,
                                     child: TextButton(
                                       onPressed: () =>
-                                          _viewFile(submission['file_path']),
+                                          _viewLink(submission['monitoring_link']),
                                       child: const Text(
-                                        'View file',
+                                        'View link',
                                         style: TextStyle(fontSize: 11),
                                       ),
                                     ),
@@ -611,8 +510,8 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                                     DataCell(
                                       TextButton(
                                         onPressed: () =>
-                                            _viewFile(submission['file_path']),
-                                        child: const Text('View file'),
+                                            _viewLink(submission['monitoring_link']),
+                                        child: const Text('View link'),
                                       ),
                                     ),
                                   ],

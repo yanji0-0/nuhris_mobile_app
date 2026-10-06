@@ -100,7 +100,7 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
                     ),
                     const SizedBox(width: 10),
                     Text(
-                      'Account',
+                      'Profile',
                       style: TextStyle(
                         color: currentItem == AppNavItem.account
                             ? const Color(0xFF94A3B8)

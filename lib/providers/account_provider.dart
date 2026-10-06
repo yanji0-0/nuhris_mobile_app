@@ -11,6 +11,13 @@ final accountProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   return await api.getAccount();
 });
 
+final employeeDegreesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+      ref.watch(appRefreshProvider);
+      final api = ref.read(apiClientProvider);
+      return await api.getEmployeeDegrees();
+    });
+
 final profilePhotoProvider = FutureProvider.autoDispose<String?>((ref) async {
   ref.watch(appRefreshProvider);
   final api = ref.read(apiClientProvider);

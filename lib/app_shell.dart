@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'providers/session_provider.dart';
 import 'screens/auth/sign_in_screen.dart';
+import 'screens/privacy_notice_screen.dart';
+import 'theme/app_theme.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
@@ -26,6 +28,19 @@ class AppShell extends ConsumerWidget {
         home: SignInScreen(
           onSignIn: controller.signIn,
           authUid: session.authUid,
+        ),
+      );
+    }
+
+    // Successful login → Privacy Notice → Continue → normal app (as on web).
+    if (!session.privacyAcknowledged) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        home: PrivacyNoticeScreen(
+          version: privacyNoticeVersion,
+          onContinue: controller.acknowledgePrivacyNotice,
+          onLogout: controller.signOut,
         ),
       );
     }

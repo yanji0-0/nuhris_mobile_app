@@ -79,7 +79,10 @@ class FakeApiClient implements AppApiClient {
   Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() async => [];
 
   @override
-  Future<List<Map<String, dynamic>>> getEmployeeCredentials() async => [];
+  Future<void> acknowledgePrivacyNotice({required String version}) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> getEmployeeDegrees() async => [];
 
   @override
   Future<String?> getCredentialFileUrl(String storedPath) async => null;
@@ -91,17 +94,6 @@ class FakeApiClient implements AppApiClient {
     required Uint8List fileBytes,
     required String originalFileName,
   }) async => '';
-
-  @override
-  Future<Map<String, dynamic>> createEmployeeCredential(
-    Map<String, dynamic> payload,
-  ) async => {};
-
-  @override
-  Future<void> deleteEmployeeCredential({
-    required dynamic id,
-    String? filePath,
-  }) async {}
 }
 
 void main() {

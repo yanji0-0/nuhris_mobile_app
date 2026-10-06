@@ -153,6 +153,42 @@ class NotificationItem {
   }
 
   bool get supportsReadActions => true;
+
+  /// Mirrors the web `AnnouncementNotification::scopeVisible`: the linked
+  /// announcement must exist (RLS lets employees read every announcement tied
+  /// to their own notifications, so an unreadable one no longer exists), be
+  /// published, not deleted, and its publish date reached.
+  bool get isVisible {
+    final data = announcement;
+    if (data == null || !data.containsKey('is_published')) return false;
+    if (data['is_published'] != true) return false;
+    if (data['deleted_at'] != null) return false;
+
+    final publishedAt = _parseManilaTimestamp(data['published_at']);
+    return publishedAt == null || !publishedAt.isAfter(_manilaNow());
+  }
+
+  /// Mirrors the web `Announcement::is_expired` accessor.
+  bool get isExpired {
+    final expiresAt = _parseManilaTimestamp(announcement?['expires_at']);
+    return expiresAt != null && !expiresAt.isAfter(_manilaNow());
+  }
+
+  // Laravel stores these as `timestamp without time zone` in Asia/Manila
+  // wall-clock time (UTC+8, no DST), so compare them as Manila wall clock.
+  static DateTime? _parseManilaTimestamp(dynamic value) {
+    final parsed = DateTime.tryParse(value?.toString() ?? '');
+    if (parsed == null || !parsed.isUtc) return parsed;
+    final manila = parsed.add(const Duration(hours: 8));
+    return DateTime(manila.year, manila.month, manila.day, manila.hour,
+        manila.minute, manila.second);
+  }
+
+  static DateTime _manilaNow() {
+    final manila = DateTime.now().toUtc().add(const Duration(hours: 8));
+    return DateTime(manila.year, manila.month, manila.day, manila.hour,
+        manila.minute, manila.second);
+  }
 }
 
 // ============================================================

@@ -1,17 +1,15 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image_cropper/image_cropper.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 
 import '../navigation/app_nav.dart';
-import '../providers/app_refresh_provider.dart';
-import '../providers/api_client_provider.dart';
 import '../providers/account_provider.dart';
+import '../providers/api_client_provider.dart';
+import '../services/api_client.dart' show ApiException;
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
+import 'file_viewer_screen.dart';
 import '../utils/employee_initials.dart';
 
 class AccountScreen extends ConsumerStatefulWidget {
@@ -33,18 +31,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   String _displayName = 'Employee';
   String _displayEmail = '';
   bool _isLoading = true;
-  bool _isSaving = false;
-  bool _isUploadingPhoto = false;
-  final ImagePicker _imagePicker = ImagePicker();
-  XFile? _profilePhoto;
   String? _profilePhotoUrl;
 
   final _employeeIdCtrl = TextEditingController();
   final _departmentCtrl = TextEditingController();
   final _positionCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
   final _dateHiredCtrl = TextEditingController();
-  final _addressCtrl = TextEditingController();
   ProviderSubscription<AsyncValue<Map<String, dynamic>>>? _accountSubscription;
   ProviderSubscription<AsyncValue<String?>>? _profilePhotoSubscription;
 
@@ -84,11 +76,9 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
             _employeeIdCtrl.text = (employee['employee_id'] ?? '').toString();
             _departmentCtrl.text = (department['name'] ?? '').toString();
             _positionCtrl.text = (employee['position'] ?? '').toString();
-            _phoneCtrl.text = (employee['phone'] ?? '').toString();
             _dateHiredCtrl.text = _formatDate(
               (employee['hire_date'] ?? '').toString(),
             );
-            _addressCtrl.text = (employee['address'] ?? '').toString();
             employeeType = _normalizeEmployeeType(employee['employment_type']);
 
             if (mounted) setState(() => _isLoading = false);
@@ -128,9 +118,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     _employeeIdCtrl.dispose();
     _departmentCtrl.dispose();
     _positionCtrl.dispose();
-    _phoneCtrl.dispose();
     _dateHiredCtrl.dispose();
-    _addressCtrl.dispose();
     super.dispose();
   }
 
@@ -148,185 +136,6 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
     _dateHiredCtrl.text =
         '${picked.month.toString().padLeft(2, '0')}/${picked.day.toString().padLeft(2, '0')}/${picked.year}';
-  }
-// ignore: unused_element
-  // ignore: unused_element
-  void _showImageDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Please choose an option'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              InkWell(
-                onTap: () {
-                  Navigator.pop(dialogContext);
-                  _getFromCamera();
-                },
-                child: const Row(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.all(4.0),
-                      child: Icon(Icons.camera, color: AppColors.primaryBlue),
-                    ),
-                    Text(
-                      'Camera',
-                      style: TextStyle(color: AppColors.primaryBlue),
-                    ),
-                  ],
-                ),
-              ),
-              InkWell(
-                onTap: () {
-                  Navigator.pop(dialogContext);
-                  _getFromGallery();
-                },
-                child: const Row(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.all(4.0),
-                      child: Icon(Icons.image, color: AppColors.primaryBlue),
-                    ),
-                    Text(
-                      'Gallery',
-                      style: TextStyle(color: AppColors.primaryBlue),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _getFromCamera() async {
-    final pickedFile = await _imagePicker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 85,
-      maxWidth: 1600,
-    );
-
-    if (pickedFile == null) return;
-    await _cropImage(pickedFile.path);
-  }
-
-  Future<void> _getFromGallery() async {
-    final pickedFile = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-      maxWidth: 1600,
-    );
-
-    if (pickedFile == null) return;
-    await _cropImage(pickedFile.path);
-  }
-
-  Future<void> _cropImage(String filePath) async {
-    final croppedImage = await ImageCropper().cropImage(
-      sourcePath: filePath,
-      maxHeight: 1080,
-      maxWidth: 1080,
-      compressQuality: 85,
-      uiSettings: [
-        AndroidUiSettings(
-          toolbarTitle: 'Crop Photo',
-          toolbarColor: AppColors.primaryBlue,
-          toolbarWidgetColor: Colors.white,
-          backgroundColor: Colors.black,
-          activeControlsWidgetColor: AppColors.primaryBlue,
-          dimmedLayerColor: Colors.black54,
-          initAspectRatio: CropAspectRatioPreset.square,
-          lockAspectRatio: false,
-          hideBottomControls: false,
-        ),
-        IOSUiSettings(
-          title: 'Crop Profile Photo',
-          aspectRatioLockEnabled: false,
-          resetAspectRatioEnabled: true,
-        ),
-      ],
-    );
-
-    if (!mounted || croppedImage == null) return;
-
-    final croppedFile = File(croppedImage.path);
-    // Force Flutter to reload file contents even if the same path is reused.
-    await FileImage(croppedFile).evict();
-
-    setState(() {
-      _profilePhoto = XFile(croppedFile.path);
-    });
-
-    await _uploadProfilePhoto(croppedFile);
-  }
-
-  Future<void> _uploadProfilePhoto(File file) async {
-    if (_isUploadingPhoto) {
-      return;
-    }
-
-    setState(() => _isUploadingPhoto = true);
-    final messenger = ScaffoldMessenger.of(context);
-
-    try {
-      final api = ref.read(apiClientProvider);
-      final result = await api.uploadProfilePhoto(filePath: file.path);
-      final uploadedUrl = (result['url'] ?? '').trim();
-      final resolvedUrl = uploadedUrl.isNotEmpty
-          ? uploadedUrl
-          : (await api.getProfilePhotoUrl() ?? '');
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _profilePhotoUrl = resolvedUrl.isEmpty ? _profilePhotoUrl : resolvedUrl;
-      });
-
-      ref.read(appRefreshProvider.notifier).trigger();
-
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Profile photo updated.')),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      final message = error.toString();
-
-      messenger.showSnackBar(
-        SnackBar(content: Text('Photo upload failed: $message')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isUploadingPhoto = false);
-      }
-    }
-  }
-
-  InputDecoration _inputDecoration({String? hintText}) {
-    return InputDecoration(
-      hintText: hintText,
-      hintStyle: const TextStyle(color: Colors.black45),
-      isDense: true,
-      filled: true,
-      fillColor: const Color(0xFFF0F0F0),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFD1D1D1)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: AppColors.primaryBlue, width: 1.2),
-      ),
-    );
   }
 
   String? _normalizeEmployeeType(dynamic value) {
@@ -359,11 +168,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       data: employeeInitialsFromAccount,
       orElse: () => 'E',
     );
-    final ImageProvider<Object>? avatarImage = _profilePhoto != null
-        ? FileImage(File(_profilePhoto!.path))
-        : (_profilePhotoUrl != null && _profilePhotoUrl!.trim().isNotEmpty
-              ? NetworkImage(_profilePhotoUrl!.trim())
-              : null);
+    final ImageProvider<Object>? avatarImage =
+        _profilePhotoUrl != null && _profilePhotoUrl!.trim().isNotEmpty
+        ? NetworkImage(_profilePhotoUrl!.trim())
+        : null;
 
     return Scaffold(
       drawer: AppDrawer(
@@ -374,7 +182,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         },
       ),
       appBar: NuhrisAppBar(
-        title: 'Account',
+        title: 'Profile',
         currentItem: AppNavItem.account,
         onNavigate: widget.onNavigate,
         onSignOut: widget.onSignOut,
@@ -512,106 +320,28 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  const _FieldLabel('Phone'),
-                  TextField(
-                    controller: _phoneCtrl,
-                    keyboardType: TextInputType.phone,
-                    decoration: _inputDecoration(hintText: 'e.g., 09171234567'),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FieldLabel('Address'),
-                  TextField(
-                    controller: _addressCtrl,
-                    decoration: _inputDecoration(hintText: 'Home Address'),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      height: 40,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSaving
-                            ? null
-                            : () async {
-                                final messenger = ScaffoldMessenger.of(context);
-                                setState(() => _isSaving = true);
-                                try {
-                                  final api = ref.read(apiClientProvider);
-                                  await api.updateAccount({
-                                    'phone': _phoneCtrl.text.trim(),
-                                    'address': _addressCtrl.text.trim(),
-                                  });
-                                  ref
-                                      .read(appRefreshProvider.notifier)
-                                      .trigger();
-                                  if (mounted) {
-                                    messenger.showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Account updated successfully.',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                } catch (error) {
-                                  if (mounted) {
-                                    messenger.showSnackBar(
-                                      SnackBar(
-                                        content: Text('Save failed: $error'),
-                                      ),
-                                    );
-                                  }
-                                } finally {
-                                  if (mounted) {
-                                    setState(() => _isSaving = false);
-                                  }
-                                }
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF014A8D),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                        ),
-                        icon: _isSaving
-                            ? const SizedBox(
-                                height: 16,
-                                width: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.save_outlined, size: 18),
-                        label: Text(
-                          _isSaving ? 'Saving...' : 'Save Changes',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
           ),
-
+          const SizedBox(height: 10),
+          const _AcademicDegreesCard(),
         ],
       ),
     );
   }
 
+  /// Web profile format: `format('M d, Y')`, e.g. "Jul 07, 2023".
   String _formatDate(String value) {
     if (value.length < 10) {
       return value;
     }
-    final date = value.substring(0, 10).split('-');
-    if (date.length != 3) {
+    // Parse only the YYYY-MM-DD part so timezones can't shift the day.
+    final date = DateTime.tryParse(value.substring(0, 10));
+    if (date == null) {
       return value;
     }
-    return '${date[1]}/${date[2]}/${date[0]}';
+    return DateFormat('MMM dd, yyyy').format(date);
   }
 
   String _displayEmployeeType() {
@@ -637,15 +367,320 @@ class _EmployeeTypeOption {
   final String label;
 }
 
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
-  final String text;
+/// View-only list of the employee's academic degree submissions, laid out like
+/// the web profile. Uploading/deleting stays on the NUHRIS Web Employee Portal.
+class _AcademicDegreesCard extends ConsumerWidget {
+  const _AcademicDegreesCard();
+
+  // Same levels and labels as the web profile.
+  static const _levels = <(String, String)>[
+    ('undergraduate', 'Undergraduate Degree'),
+    ('masters', "Master's Degree"),
+    ('doctoral', 'Doctoral Degree'),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final degreesAsync = ref.watch(employeeDegreesProvider);
+
+    final Widget body = degreesAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Failed to load academic degrees: $error',
+            style: const TextStyle(color: AppColors.red, fontSize: 13),
+          ),
+          TextButton(
+            onPressed: () => ref.invalidate(employeeDegreesProvider),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+      data: (degrees) => Column(
+        children: [
+          for (final (level, label) in _levels) ...[
+            _DegreeTile(
+              label: label,
+              // Web: `$degrees->firstWhere('degree_level', $level)`.
+              degree: degrees
+                  .where((d) => d['degree_level']?.toString() == level)
+                  .firstOrNull,
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Academic Degrees',
+              style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 14),
+            body,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    color: Color(0xFF1D4ED8),
+                    size: 20,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'To submit or update your Undergraduate, Master\'s, or '
+                      'Doctoral Degree documents, please use the NUHRIS Web '
+                      'Employee Portal.',
+                      style: TextStyle(
+                        color: Color(0xFF1E3A8A),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DegreeTile extends ConsumerStatefulWidget {
+  const _DegreeTile({required this.label, required this.degree});
+
+  final String label;
+  final Map<String, dynamic>? degree;
+
+  @override
+  ConsumerState<_DegreeTile> createState() => _DegreeTileState();
+}
+
+class _DegreeTileState extends ConsumerState<_DegreeTile> {
+  bool _opening = false;
+
+  /// View-only: signs the stored object key in the private "credentials"
+  /// bucket (same path as WFH Monitoring) and opens the in-app PDF viewer.
+  Future<void> _openPdf(String filePath) async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    final degree = widget.degree ?? const {};
+    debugPrint(
+      'DegreePDF open: employee_id=${degree['employee_id']} '
+      'degree_level=${degree['degree_level']} '
+      'credential_type=${degree['credential_type']} file_path=$filePath',
+    );
+
+    try {
+      final url = await ref
+          .read(apiClientProvider)
+          .getCredentialFileUrl(filePath);
+      // Never log the signed token (query string).
+      debugPrint(
+        'DegreePDF signed url: '
+        '${url == null || url.isEmpty ? 'NULL/EMPTY' : url.split('?').first} '
+        '(token present: ${url?.contains('token=') ?? false})',
+      );
+      if (!mounted) return;
+      if (url == null || url.isEmpty) {
+        throw ApiException('The file for this degree could not be found.');
+      }
+      await navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => FileViewerScreen(url: url, title: widget.label),
+        ),
+      );
+    } catch (error) {
+      debugPrint('DegreePDF signed url failed: $error');
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Unable to open this PDF right now. Please try again.',
+          ),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _openPdf(filePath),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+    final data = widget.degree;
+    final label = widget.label;
+    final status = (data?['status'] ?? '').toString().trim();
+    final filePath = (data?['file_path'] ?? '').toString().trim();
+    final fileName = (data?['original_filename'] ?? '').toString().trim();
+    final notes = (data?['review_notes'] ?? '').toString().trim();
+    final submittedAt = DateTime.tryParse(
+      (data?['created_at'] ?? '').toString(),
+    );
+
+    // Web badge: green for verified, amber for any other status.
+    final (String badgeText, Color badgeBg, Color badgeFg) = data == null
+        ? ('Not Submitted', const Color(0xFFF1F5F9), const Color(0xFF475569))
+        : status == 'verified'
+        ? ('Verified', const Color(0xFFD1FAE5), const Color(0xFF047857))
+        : (
+            status.isEmpty
+                ? 'Pending'
+                : '${status[0].toUpperCase()}${status.substring(1)}',
+            const Color(0xFFFEF3C7),
+            const Color(0xFFB45309),
+          );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FBFF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE1E8F4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: badgeBg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badgeText,
+                  style: TextStyle(
+                    color: badgeFg,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (data != null) ...[
+            if (fileName.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.picture_as_pdf_outlined,
+                    size: 18,
+                    color: Color(0xFF657A99),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (submittedAt != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Submitted ${DateFormat('MMM dd, yyyy').format(submittedAt)}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.mutedText,
+                ),
+              ),
+            ],
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'HR note: $notes',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+              ),
+            ],
+            if (filePath.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _opening ? null : () => _openPdf(filePath),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1D4ED8),
+                  backgroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0xFF93C5FD)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  minimumSize: const Size(0, 34),
+                  visualDensity: VisualDensity.compact,
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                icon: _opening
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('View PDF'),
+              ),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }

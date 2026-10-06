@@ -9,7 +9,6 @@ import 'providers/app_refresh_provider.dart';
 import 'screens/account_screen.dart';
 import 'screens/academic_calendar_screen.dart';
 import 'screens/attendance_dtr_screen.dart';
-import 'screens/credentials_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/leave_monitoring_screen.dart';
 import 'screens/notifications_screen.dart';
@@ -116,13 +115,6 @@ class _NuhrisEmployeeAppState
 
       case AppNavItem.academicCalendar:
         screen = AcademicCalendarScreen(
-          onNavigate: _navigate,
-          onSignOut: widget.onSignOut,
-        );
-        break;
-
-      case AppNavItem.credentials:
-        screen = CredentialsScreen(
           onNavigate: _navigate,
           onSignOut: widget.onSignOut,
         );

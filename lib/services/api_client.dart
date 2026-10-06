@@ -168,8 +168,12 @@ class ApiClient implements AppApiClient {
     }
   }
 
+  /// Mirrors the web `Employee\PortalController::dashboard` data: present
+  /// days per cutoff of the current month and the latest approved schedule.
+  /// Recent alerts and the academic calendar come from their own providers.
   @override
   Future<Map<String, dynamic>> getDashboard() async {
+    final user = await _currentUserRow();
     final employee = await _currentEmployee();
     if (employee == null) {
       throw ApiException('Employee profile not found.');
@@ -180,236 +184,56 @@ class ApiClient implements AppApiClient {
       throw ApiException('Employee profile not found.');
     }
 
-    final attendanceRows = await _client
-        .from('attendance_records')
-        .select('status')
-        .eq('employee_id', employeeId);
+    // The web app runs on Asia/Manila (UTC+8, no DST), so the cutoffs are
+    // resolved against Manila's calendar date rather than the device clock.
+    final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final year = manilaNow.year;
+    final month = manilaNow.month;
+    final lastDay = DateTime(year, month + 1, 0).day;
 
-    final leaveBalances = await _client
-        .from('leave_balances')
-        .select('id,remaining_days')
-        .eq('employee_id', employeeId);
+    String isoDate(int day) =>
+        '${year.toString().padLeft(4, '0')}-'
+        '${month.toString().padLeft(2, '0')}-'
+        '${day.toString().padLeft(2, '0')}';
 
-    final leaveRequests = await _client
-        .from('leave_requests')
-        .select('id,status')
-        .eq('employee_id', employeeId);
-
-    final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
-    final credentialRows = await _queryEmployeeCredentials(
-      select: 'id,status,credential_type,expires_at,created_at',
-      employeeIdentifiers: credentialIdentifiers,
-    );
-
-    final notificationItems = await getNotifications();
-
-    final attendanceSummary = <String, int>{
-      'present': 0,
-      'absent': 0,
-      'on_leave': 0,
-    };
-
-    for (final row in attendanceRows.whereType<Map>()) {
-      final status = (row['status'] ?? '').toString();
-      if (attendanceSummary.containsKey(status)) {
-        attendanceSummary[status] = (attendanceSummary[status] ?? 0) + 1;
-      }
+    Future<int> countPresentDays(int fromDay, int toDay) async {
+      final rows = await _client
+          .from('attendance_records')
+          .select('id')
+          .eq('employee_id', employeeId)
+          .eq('status', 'present')
+          .gte('record_date', isoDate(fromDay))
+          .lte('record_date', isoDate(toDay));
+      return rows.length;
     }
 
-    final pending = leaveRequests
-        .whereType<Map>()
-        .where((row) => (row['status'] ?? '').toString() == 'pending')
-        .length;
+    final presentDays = await Future.wait([
+      countPresentDays(1, 15),
+      countPresentDays(16, lastDay),
+    ]);
 
-    final nonCompliantStatuses = <String>{
-      'expired',
-      'rejected',
-      'invalid',
-      'non-compliant',
-      'non_compliant',
-    };
-
-    bool isApprovedCredential(Map row) {
-      final status = (row['status'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-      return status.isEmpty ||
-        status == 'verified' ||
-        status == 'approved' ||
-        status == 'active' ||
-        status == 'compliant' ||
-        status == 'valid';
-    }
-
-    bool isExpiredCredential(Map row) {
-      final rawType = (row['credential_type'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      final status = (row['status'] ?? '').toString().trim().toLowerCase();
-      if (nonCompliantStatuses.contains(status)) {
-        return true;
-      }
-
-      final expiresAtRaw = (row['expires_at'] ?? '').toString().trim();
-      final createdAtRaw = (row['created_at'] ?? '').toString().trim();
-      final expiresAt = DateTime.tryParse(expiresAtRaw);
-      final createdAt = DateTime.tryParse(createdAtRaw);
-
-      DateTime? effectiveExpiresAt;
-      if (rawType == 'resume' || rawType.contains('resume')) {
-        if (expiresAt != null &&
-            createdAt != null &&
-            expiresAt.year == createdAt.year &&
-            expiresAt.month == createdAt.month &&
-            expiresAt.day == createdAt.day) {
-          effectiveExpiresAt = DateTime(
-            createdAt.year + 1,
-            createdAt.month,
-            createdAt.day,
-          );
-        } else {
-          effectiveExpiresAt =
-              expiresAt ?? createdAt?.add(const Duration(days: 365));
-        }
-      } else if (rawType == 'prc' || rawType.contains('prc license')) {
-        effectiveExpiresAt = expiresAt;
-      } else {
-        effectiveExpiresAt = expiresAt;
-      }
-
-      if (effectiveExpiresAt == null) {
-        return false;
-      }
-
-      final now = DateTime.now();
-      return effectiveExpiresAt.isBefore(
-        DateTime(now.year, now.month, now.day),
-      );
-    }
-
-    bool isExpiringSoonCredential(Map row) {
-      final rawType = (row['credential_type'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      final thresholdDays = rawType == 'resume' || rawType.contains('resume')
-          ? 30
-          : rawType == 'prc' || rawType.contains('prc license')
-          ? 90
-          : null;
-      if (thresholdDays == null) {
-        return false;
-      }
-
-      final expiresAtRaw = (row['expires_at'] ?? '').toString().trim();
-      final createdAtRaw = (row['created_at'] ?? '').toString().trim();
-      final expiresAt = DateTime.tryParse(expiresAtRaw);
-      final createdAt = DateTime.tryParse(createdAtRaw);
-
-      DateTime? effectiveExpiresAt;
-      if (rawType == 'resume' || rawType.contains('resume')) {
-        if (expiresAt != null &&
-            createdAt != null &&
-            expiresAt.year == createdAt.year &&
-            expiresAt.month == createdAt.month &&
-            expiresAt.day == createdAt.day) {
-          effectiveExpiresAt = DateTime(
-            createdAt.year + 1,
-            createdAt.month,
-            createdAt.day,
-          );
-        } else {
-          effectiveExpiresAt =
-              expiresAt ?? createdAt?.add(const Duration(days: 365));
-        }
-      } else {
-        effectiveExpiresAt = expiresAt;
-      }
-
-      if (effectiveExpiresAt == null) {
-        return false;
-      }
-
-      final now = DateTime.now();
-      final startOfToday = DateTime(now.year, now.month, now.day);
-      if (effectiveExpiresAt.isBefore(startOfToday)) {
-        return false;
-      }
-
-      final warningEnd = startOfToday.add(Duration(days: thresholdDays));
-      return !effectiveExpiresAt.isAfter(warningEnd);
-    }
-
-    final activeCredentials = credentialRows.whereType<Map>().where((row) {
-      final item = row.cast<String, dynamic>();
-      return isApprovedCredential(item) && !isExpiredCredential(item);
-    }).length;
-
-    final expiringSoon = credentialRows.whereType<Map>().where((row) {
-      final item = row.cast<String, dynamic>();
-      return isApprovedCredential(item) && isExpiringSoonCredential(item);
-    }).length;
-
-    final pendingReviewCredentials = credentialRows.whereType<Map>().where((
-      row,
-    ) {
-      final status = (row['status'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      return status == 'pending';
-    }).length;
-
-    final compliantCredentials = credentialRows.whereType<Map>().where((row) {
-      final item = row.cast<String, dynamic>();
-      return isApprovedCredential(item) && !isExpiredCredential(item);
-    }).length;
-
-    final nonCompliantCredentials = credentialRows.whereType<Map>().where((
-      row,
-    ) {
-      final item = row.cast<String, dynamic>();
-      return !isApprovedCredential(item) || isExpiredCredential(item);
-    }).length;
-
-    final unreadNotifications = notificationItems
-      .where((row) => row['is_read'] != true)
-      .length;
-
-    final totalLeaveDays = leaveBalances.whereType<Map>().fold<double>(0, (
-      sum,
-      row,
-    ) {
-      final value = row['remaining_days'];
-      if (value is num) {
-        return sum + value.toDouble();
-      }
-      return sum + (double.tryParse(value?.toString() ?? '') ?? 0);
-    });
+    // Same ordering as Eloquent's latest('reviewed_at')->latest('updated_at')
+    // on Postgres, where DESC places NULLs first.
+    final scheduleRows = await _client
+        .from('employee_schedule_submissions')
+        .select('id,term_label,semester_label,status,reviewed_at,updated_at')
+        .eq('employee_id', employeeId)
+        .eq('status', 'approved')
+        .order('reviewed_at', ascending: false, nullsFirst: true)
+        .order('updated_at', ascending: false, nullsFirst: true)
+        .limit(1);
+    final scheduleList = _toMapList(scheduleRows);
 
     return {
+      'user': user,
       'employee': employee,
-      'attendance_summary': attendanceSummary,
-      'leave_summary': {
-        'balance_count': leaveBalances.length,
-        'request_count': leaveRequests.length,
-        'pending_requests': pending,
-        'total_days_remaining': totalLeaveDays,
+      'present_days': {
+        'first_cutoff': presentDays[0],
+        'second_cutoff': presentDays[1],
       },
-      'credentials_summary': {
-        'total_count': credentialRows.length,
-        'active_count': activeCredentials,
-        'pending_review_count': pendingReviewCredentials,
-        'expiring_soon_count': expiringSoon,
-        'non_compliant_count': nonCompliantCredentials,
-        'compliant_count': compliantCredentials,
-      },
-      'notifications_summary': {
-        'total_count': notificationItems.length,
-        'unread_count': unreadNotifications,
-      },
+      'latest_approved_schedule': scheduleList.isEmpty
+          ? null
+          : scheduleList.first,
     };
   }
 
@@ -612,11 +436,14 @@ class ApiClient implements AppApiClient {
           'id,employee_id,leave_type,start_date,end_date,days_deducted,status,cutoff_date,reason,created_at,updated_at',
         )
         .eq('employee_id', employeeId)
-        .order('created_at', ascending: false);
+        // Web: `latest('start_date')` (Postgres DESC puts NULLs first).
+        .order('start_date', ascending: false, nullsFirst: true);
 
     return {
       'balances': sortedBalances,
       'requests': _toMapList(requests),
+      // Needed for the web's current-employment-year usage window.
+      'hire_date': employee['hire_date'],
     };
   }
 
@@ -681,12 +508,14 @@ class ApiClient implements AppApiClient {
 
     late http.Response response;
     try {
-      response = await http.get(
-        uri,
-        headers: const {'Accept': 'application/json'},
-      );
+      response = await http
+          .get(uri, headers: const {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 15));
     } catch (error) {
-      throw ApiException('Failed to load Academic Calendar: $error');
+      throw ApiException(
+        'Cannot reach the Laravel API at $uri. '
+        '${_laravelReachabilityHint(uri)}',
+      );
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -710,6 +539,17 @@ class ApiClient implements AppApiClient {
       ..sort((left, right) => left.eventDate.compareTo(right.eventDate));
 
     return entries;
+  }
+
+  String _laravelReachabilityHint(Uri uri) {
+    final isLoopback = uri.host == '127.0.0.1' || uri.host == 'localhost';
+    if (isLoopback && !kIsWeb && Platform.isAndroid) {
+      return 'On Android, $uri points at the device itself. Run Laravel with '
+          '"php artisan serve --host=0.0.0.0" and set LARAVEL_BASE_URL to '
+          'http://10.0.2.2:8000 (emulator) or your PC\'s LAN IP (device).';
+    }
+    return 'Make sure the Laravel server is running and LARAVEL_BASE_URL '
+        'is reachable from this device.';
   }
 
   @override
@@ -1273,20 +1113,76 @@ class ApiClient implements AppApiClient {
     return null;
   }
 
+  /// Mirrors the web `PrivacyNoticeController::acknowledge`:
+  /// `updateOrCreate` on (user_id, privacy_notice_version) in
+  /// `privacy_notice_acknowledgments`, setting `acknowledged_at` to now.
   @override
-  Future<List<Map<String, dynamic>>> getEmployeeCredentials() async {
+  Future<void> acknowledgePrivacyNotice({required String version}) async {
+    final user = await _currentUserRow();
+    final userId = _toIntId(user?['id']);
+    if (userId == null) {
+      throw ApiException('User profile not found.');
+    }
+
+    // Laravel stores these `timestamp without time zone` columns in
+    // Asia/Manila wall-clock time (UTC+8).
+    final manila = DateTime.now().toUtc().add(const Duration(hours: 8));
+    String two(int value) => value.toString().padLeft(2, '0');
+    final now =
+        '${manila.year}-${two(manila.month)}-${two(manila.day)} '
+        '${two(manila.hour)}:${two(manila.minute)}:${two(manila.second)}';
+
+    try {
+      final existing = _toMapList(
+        await _client
+            .from('privacy_notice_acknowledgments')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('privacy_notice_version', version)
+            .limit(1),
+      );
+
+      if (existing.isNotEmpty) {
+        await _client
+            .from('privacy_notice_acknowledgments')
+            .update({'acknowledged_at': now, 'updated_at': now})
+            .eq('id', existing.first['id']);
+      } else {
+        await _client.from('privacy_notice_acknowledgments').insert({
+          'user_id': userId,
+          'privacy_notice_version': version,
+          'acknowledged_at': now,
+          'created_at': now,
+          'updated_at': now,
+        });
+      }
+    } on PostgrestException catch (error) {
+      throw ApiException(
+        'Failed to record Privacy Notice acknowledgment: ${error.message}',
+      );
+    }
+  }
+
+  /// Read-only mirror of the web `Employee\PortalController::profile` degree
+  /// list: the employee's `employee_credentials` rows of type `degrees`.
+  /// Submitting or deleting degrees is only available on the web portal.
+  @override
+  Future<List<Map<String, dynamic>>> getEmployeeDegrees() async {
     final employee = await _currentEmployee();
-    if (employee == null || employee['id'] == null) {
+    final employeeId = _toIntId(employee?['id']);
+    if (employeeId == null) {
       throw ApiException('Employee profile not found.');
     }
 
-    final credentialIdentifiers = _employeeCredentialIdentifiers(employee);
-    final rows = await _queryEmployeeCredentials(
-      select:
-          'id,employee_id,credential_type,title,department_id,expires_at,description,file_path,status,review_notes,created_at,updated_at',
-      employeeIdentifiers: credentialIdentifiers,
-      orderByCreatedAtDesc: true,
-    );
+    final rows = await _client
+        .from('employee_credentials')
+        .select(
+          'id,employee_id,credential_type,degree_level,status,file_path,'
+          'original_filename,review_notes,created_at',
+        )
+        .eq('employee_id', employeeId)
+        .eq('credential_type', 'degrees')
+        .order('id', ascending: true);
 
     return _toMapList(rows);
   }
@@ -1319,120 +1215,6 @@ class ApiClient implements AppApiClient {
   }
 
   @override
-  Future<void> deleteEmployeeCredential({
-    required dynamic id,
-    String? filePath,
-  }) async {
-    try {
-      await _client.from('employee_credentials').delete().eq('id', id);
-    } catch (error) {
-      throw ApiException('Failed to delete credential: $error');
-    }
-
-    final deletedFilePath = (filePath ?? '').toString().trim();
-    if (deletedFilePath.isEmpty) {
-      return;
-    }
-
-    if (deletedFilePath.startsWith('http://') ||
-        deletedFilePath.startsWith('https://')) {
-      return;
-    }
-
-    final normalized = deletedFilePath;
-    final slash = normalized.indexOf('/');
-    if (slash <= 0 || slash >= normalized.length - 1) {
-      return;
-    }
-
-    final maybeBucket = normalized.substring(0, slash);
-    final objectTail = normalized.substring(slash + 1);
-
-    final targetBuckets = <String>[];
-    if (_credentialFilesBuckets.contains(maybeBucket)) {
-      targetBuckets.add(maybeBucket);
-    }
-    for (final bucket in _credentialFilesBuckets) {
-      if (!targetBuckets.contains(bucket)) {
-        targetBuckets.add(bucket);
-      }
-    }
-
-    for (final bucket in targetBuckets) {
-      final objectPath = bucket == maybeBucket ? objectTail : normalized;
-      try {
-        await _client.storage.from(bucket).remove([objectPath]);
-        break;
-      } catch (_) {
-        // Best-effort cleanup only.
-      }
-    }
-  }
-
-  @override
-  Future<Map<String, dynamic>> createEmployeeCredential(
-    Map<String, dynamic> payload,
-  ) async {
-    Future<Map<String, dynamic>> insertWithPayload(
-      Map<String, dynamic> insertPayload,
-    ) async {
-      await _client.from('employee_credentials').insert(insertPayload);
-      return Map<String, dynamic>.from(insertPayload);
-    }
-
-    try {
-      return await insertWithPayload(payload);
-    } on PostgrestException catch (error) {
-      final message = error.message.toLowerCase();
-      final isPolicyDenied =
-          error.code == '42501' || message.contains('row-level security');
-      if (!isPolicyDenied) {
-        rethrow;
-      }
-
-      final employee = await _currentEmployee();
-      final attempted = (payload['employee_id'] ?? '').toString().trim();
-      final fallbackIds = <dynamic>[];
-      final seen = <String>{attempted};
-
-      void addFallback(dynamic value) {
-        if (value == null) {
-          return;
-        }
-        final text = value.toString().trim();
-        if (text.isEmpty || seen.contains(text)) {
-          return;
-        }
-        seen.add(text);
-        fallbackIds.add(value);
-      }
-
-      addFallback(employee?['employee_id']);
-      addFallback(employee?['id']);
-
-      for (final fallbackId in fallbackIds) {
-        final fallbackPayload = Map<String, dynamic>.from(payload)
-          ..['employee_id'] = fallbackId;
-        try {
-          return await insertWithPayload(fallbackPayload);
-        } on PostgrestException catch (fallbackError) {
-          final fallbackMessage = fallbackError.message.toLowerCase();
-          final stillPolicyDenied =
-              fallbackError.code == '42501' ||
-              fallbackMessage.contains('row-level security');
-          if (!stillPolicyDenied) {
-            rethrow;
-          }
-        }
-      }
-
-      throw ApiException(
-        'Credential insert failed: ${error.message}. The row was blocked by RLS on employee_credentials.',
-      );
-    }
-  }
-
-  @override
   Future<String> uploadEmployeeCredentialFile({
     required dynamic employeeId,
     dynamic employeeAlternateId,
@@ -1448,11 +1230,11 @@ class ApiClient implements AppApiClient {
     final authUid = (_client.auth.currentUser?.id ?? '').trim();
     final userId = (user?['id'] ?? '').toString().trim();
 
-    print('DEBUG uploadEmployeeCredentialFile:');
-    print('  currentUser: ${_client.auth.currentUser?.email}');
-    print('  authUid: "$authUid"');
-    print('  userId: "$userId"');
-    print('  employeeId: "$employeeId"');
+    debugPrint('DEBUG uploadEmployeeCredentialFile:');
+    debugPrint('  currentUser: ${_client.auth.currentUser?.email}');
+    debugPrint('  authUid: "$authUid"');
+    debugPrint('  userId: "$userId"');
+    debugPrint('  employeeId: "$employeeId"');
 
     final candidatePrefixes = <String>{
       'employee-$employeeId',
@@ -1465,7 +1247,7 @@ class ApiClient implements AppApiClient {
       if (userId.isNotEmpty) 'user-$userId',
       if (userId.isNotEmpty) userId,
     }.toList();
-    print('  candidatePrefixes: $candidatePrefixes');
+    debugPrint('  candidatePrefixes: $candidatePrefixes');
 
     final contentType = _contentTypeFromFileName(safeName);
 
@@ -1863,6 +1645,7 @@ class ApiClient implements AppApiClient {
             .from('employees')
             .select('*')
             .eq('auth_id', authUserId)
+            .isFilter('deleted_at', null)
             .limit(1);
         return _toMapList(rows);
       } catch (_) {
@@ -1875,12 +1658,26 @@ class ApiClient implements AppApiClient {
         return const [];
       }
       try {
+        // `ilike` treats `_`/`%` (and PostgREST `*`) as wildcards, so confirm
+        // the match in Dart; an exact-case match wins, as on the web
+        // (`Employee::where('email', ...)`, soft-deleted rows excluded).
         final rows = await _client
             .from('employees')
             .select('*')
             .ilike('email', email)
-            .limit(1);
-        return _toMapList(rows);
+            .isFilter('deleted_at', null)
+            .order('id', ascending: true);
+        final matches = _toMapList(rows)
+            .where(
+              (row) =>
+                  (row['email'] ?? '').toString().trim().toLowerCase() ==
+                  email.toLowerCase(),
+            )
+            .toList();
+        final exact = matches.where(
+          (row) => (row['email'] ?? '').toString().trim() == email,
+        );
+        return exact.isNotEmpty ? [exact.first] : matches.take(1).toList();
       } catch (_) {
         return const [];
       }
@@ -1978,64 +1775,6 @@ class ApiClient implements AppApiClient {
   int? _toIntId(dynamic value) {
     if (value == null) return null;
     return int.tryParse(value.toString().trim());
-  }
-
-  List<dynamic> _employeeCredentialIdentifiers(Map<String, dynamic> employee) {
-    final identifiers = <dynamic>[];
-    final seen = <String>{};
-
-    void addIdentifier(dynamic value) {
-      if (value == null) {
-        return;
-      }
-      final text = value.toString().trim();
-      if (text.isEmpty || !seen.add(text)) {
-        return;
-      }
-      identifiers.add(value);
-    }
-
-    // employee_credentials.employee_id has a FK to employees.id,
-    // so reads should primarily use the same key used by inserts.
-    addIdentifier(employee['id']);
-    if (identifiers.isEmpty) {
-      addIdentifier(employee['employee_id']);
-    }
-    return identifiers;
-  }
-
-  Future<dynamic> _queryEmployeeCredentials({
-    required String select,
-    required List<dynamic> employeeIdentifiers,
-    bool orderByCreatedAtDesc = false,
-  }) async {
-    if (employeeIdentifiers.isEmpty) {
-      return const [];
-    }
-
-    // Ensure we only pass numeric identifiers to employee_id (bigint).
-    final numericIdentifiers = employeeIdentifiers
-        .where((c) => int.tryParse(c.toString().trim()) != null)
-        .map((c) => int.parse(c.toString().trim()))
-        .toList();
-
-    if (numericIdentifiers.isEmpty) {
-      return const [];
-    }
-
-    dynamic query = _client.from('employee_credentials').select(select);
-
-    if (numericIdentifiers.length == 1) {
-      query = query.eq('employee_id', numericIdentifiers.first);
-    } else {
-      query = query.inFilter('employee_id', numericIdentifiers);
-    }
-
-    if (orderByCreatedAtDesc) {
-      query = query.order('created_at', ascending: false);
-    }
-
-    return query;
   }
 
 }

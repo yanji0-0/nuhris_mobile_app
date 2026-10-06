@@ -17,7 +17,6 @@ class FileViewerScreen extends StatefulWidget {
 class _FileViewerScreenState extends State<FileViewerScreen> {
   bool _loading = true;
   bool _loadFailed = false;
-  String _errorMessage = '';
   Uint8List? _bytes;
   String? _contentType;
   PdfControllerPinch? _pdfController;
@@ -56,17 +55,35 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         ext == 'webp';
   }
 
+  /// Logs technical details for developers only; the signed URL's token
+  /// (query string) is stripped so it never reaches logs or the UI.
+  void _logError(String stage, Object error) {
+    final safeUrl = widget.url.split('?').first;
+    final details = error.toString().replaceAll(widget.url, safeUrl);
+    debugPrint('FileViewer $stage failed for $safeUrl: $details');
+  }
+
   Future<void> _loadFile() async {
+    _pdfController?.dispose();
     setState(() {
+      _pdfController = null;
       _loading = true;
       _loadFailed = false;
-      _errorMessage = '';
     });
 
     try {
       final response = await http
           .get(Uri.parse(widget.url))
           .timeout(const Duration(seconds: 30));
+
+      final head = response.bodyBytes.take(5).toList();
+      debugPrint(
+        'FileViewer download: ${widget.url.split('?').first} '
+        'status=${response.statusCode} '
+        'content-type=${response.headers['content-type']} '
+        'bytes=${response.bodyBytes.length} '
+        'starts-with-%PDF=${String.fromCharCodes(head) == '%PDF-'}',
+      );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
@@ -102,13 +119,48 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         _loading = false;
       });
     } catch (error) {
+      _logError('download', error);
       if (!mounted) return;
       setState(() {
         _loading = false;
         _loadFailed = true;
-        _errorMessage = error.toString();
       });
     }
+  }
+
+  Widget _buildError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(
+              'Unable to load this file',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Unable to load this PDF. Please try again.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _loadFile,
+              child: const Text('Retry'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Go Back'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -135,38 +187,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     }
 
     if (_loadFailed) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text(
-              'Unable to load file',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                _errorMessage,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _loadFile,
-              child: const Text('Retry'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Go Back'),
-            ),
-          ],
-        ),
-      );
+      return _buildError();
     }
 
     final bytes = _bytes;
@@ -178,7 +199,18 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     final contentType = _contentType ?? '';
 
     if (_isPdf(contentType, ext) && _pdfController != null) {
-      return PdfViewPinch(controller: _pdfController!);
+      // pdfx reports renderer failures (e.g. PDF.js missing on web) as a
+      // generic "Unknown error"; show the friendly message instead.
+      return PdfViewPinch(
+        controller: _pdfController!,
+        builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
+          options: const DefaultBuilderOptions(),
+          errorBuilder: (context, error) {
+            _logError('render', error);
+            return _buildError();
+          },
+        ),
+      );
     }
 
     if (_isImage(contentType, ext)) {

@@ -78,7 +78,7 @@ class NotificationsScreen extends ConsumerWidget {
                       child: Padding(
                         padding: EdgeInsets.only(top: 8),
                         child: Text(
-                          'Stay updated with credential reminders, HR announcements, and compliance alerts.',
+                          'Stay updated with HR announcements and important alerts.',
                           style: TextStyle(
                             color: Color(0xFF4B556A),
                             fontSize: 16,
@@ -134,71 +134,63 @@ class NotificationsScreen extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFFE6ECF6)),
+                notificationState.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 56),
+                    child: Center(child: CircularProgressIndicator()),
                   ),
-                  child: notificationState.when(
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 56),
-                      child: Center(child: CircularProgressIndicator()),
+                  error: (error, stackTrace) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 38,
                     ),
-                    error: (error, stackTrace) => Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 38,
+                    child: Text(
+                      'Failed to load notifications:\n$error',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF4B556A),
+                        fontWeight: FontWeight.w500,
                       ),
-                      child: Text(
-                        'Failed to load notifications:\n$error',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFF4B556A),
-                          fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  data: (notifications) {
+                    if (notifications.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 30,
                         ),
-                      ),
-                    ),
-                    data: (notifications) {
-                      if (notifications.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 22,
-                            vertical: 30,
+                        child: Text(
+                          'No notifications found.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Color(0xFF92A0B5),
+                            fontWeight: FontWeight.w600,
+                            height: 1.35,
                           ),
-                          child: Text(
-                            'No notifications found.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Color(0xFF92A0B5),
-                              fontWeight: FontWeight.w600,
-                              height: 1.35,
-                            ),
+                        ),
+                      );
+                    }
+
+                    return Column(
+                      children: notifications.map((item) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _NotificationCard(
+                            key: ValueKey(item.id),
+                            item: item,
+                            onOpened: () async {
+                              if (!item.isRead) {
+                                await controller.markNotificationRead(
+                                  item.id.toString(),
+                                );
+                              }
+                            },
                           ),
                         );
-                      }
-
-                      return Column(
-                        children: notifications.map((item) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _NotificationCard(
-                              key: ValueKey(item.id),
-                              item: item,
-                              onOpened: () async {
-                                if (!item.isRead) {
-                                  await controller.markNotificationRead(
-                                    item.id.toString(),
-                                  );
-                                }
-                              },
-                            ),
-                          );
-                        }).toList(),
-                      );
-                    },
-                  ),
+                      }).toList(),
+                    );
+                  },
                 ),
               ],
             ),

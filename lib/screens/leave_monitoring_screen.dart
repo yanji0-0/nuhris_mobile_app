@@ -87,23 +87,21 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
           }
 
           final payload = snapshot.data ?? {};
-          final balances =
-              ((payload['balances'] as List?) ?? const [])
-                  .whereType<Map>()
-                  .map((e) => e.cast<String, dynamic>())
-                  .toList()
-                ..sort(_compareNewestFirst);
-          final requests =
-              ((payload['requests'] as List?) ?? const [])
-                  .whereType<Map>()
-                  .map((e) => e.cast<String, dynamic>())
-                  .toList()
-                ..sort(_compareNewestFirst);
-          final usageSummary = _buildLeaveUsageSummary(requests);
-          final remainingBalances = _buildRemainingBalanceSummary(
-            balances,
+          final balances = ((payload['balances'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((e) => e.cast<String, dynamic>())
+              .toList();
+          // Already ordered like the web: latest start_date first.
+          final requests = ((payload['requests'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((e) => e.cast<String, dynamic>())
+              .toList();
+          final breakdown = _buildLeaveUsageBreakdown(
             requests,
+            _currentEmploymentYearStart(payload['hire_date']),
           );
+          final usageSummary = _buildLeaveUsageSummary(breakdown);
+          final remainingBalances = _deductibleBalances(balances);
 
           return Container(
             decoration: const BoxDecoration(
@@ -130,14 +128,16 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                       height: 1.3,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  const _Disclaimer(),
                   const SizedBox(height: 10),
                   _LeaveUsageSummaryPanel(usageSummary: usageSummary),
+                  if (remainingBalances.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _RemainingBalanceSection(balances: remainingBalances),
+                  ],
                   const SizedBox(height: 12),
-                  _RemainingBalanceSection(balances: remainingBalances),
-                  const SizedBox(height: 12),
-                  _LeaveUsageBreakdownPanel(
-                    breakdown: _buildLeaveUsageBreakdown(requests),
-                  ),
+                  _LeaveUsageBreakdownPanel(breakdown: breakdown),
                   const SizedBox(height: 12),
                   const Text(
                     'Leave History',
@@ -151,9 +151,9 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
                   if (requests.isEmpty)
                     const _EmptyHistoryCard()
                   else
-                    ...requests
-                        .take(20)
-                        .map((request) => _LeaveHistoryCard(request: request)),
+                    ...requests.map(
+                      (request) => _LeaveHistoryCard(request: request),
+                    ),
                   const SizedBox(height: 12),
                   const _FooterNote(),
                 ],
@@ -166,14 +166,20 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
   }
 }
 
-String _formatDate(String value) {
-  if (value.isEmpty) {
-    return '-';
-  }
+/// Web Leave History start/end: `toDateString()` (Y-m-d).
+String _historyDate(String value) {
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return value;
+  return '${parsed.year.toString().padLeft(4, '0')}-'
+      '${parsed.month.toString().padLeft(2, '0')}-'
+      '${parsed.day.toString().padLeft(2, '0')}';
+}
 
+/// Web Leave History cut-off: `format('M d, Y') ?? '-'` (e.g. Aug 04, 2026).
+String _historyCutoff(String value) {
   final parsed = DateTime.tryParse(value);
   if (parsed == null) {
-    return value.length >= 10 ? value.substring(0, 10) : value;
+    return '-';
   }
 
   const months = [
@@ -191,7 +197,8 @@ String _formatDate(String value) {
     'Dec',
   ];
 
-  return '${months[parsed.month - 1]} ${parsed.day}, ${parsed.year}';
+  return '${months[parsed.month - 1]} '
+      '${parsed.day.toString().padLeft(2, '0')}, ${parsed.year}';
 }
 
 String _statusLabel(String value) {
@@ -230,20 +237,37 @@ Color _statusForeground(String status) {
   }
 }
 
-String _remainingDays(dynamic value) {
-  if (value is int) {
-    return value.toString();
-  }
+// ============================================================
+// Port of the web `App\Services\LeaveBalanceService` +
+// `Employee\PortalController::leave` calculations.
+// ============================================================
 
-  if (value is num) {
-    final asDouble = value.toDouble();
-    return asDouble == asDouble.roundToDouble()
-        ? asDouble.toInt().toString()
-        : asDouble.toStringAsFixed(1);
-  }
+/// Leave types that reduce the remaining balance (web DEDUCTIBLE_LEAVE_TYPES).
+const _deductibleLeaveTypes = <String>[
+  'Vacation Leave',
+  'Sick Leave',
+  'Emergency Leave',
+];
 
-  return value?.toString() ?? '0';
-}
+/// Every leave type the web lists in "Detailed Leave Usage", in web order.
+const _allLeaveTypes = <String>[
+  'Vacation Leave',
+  'Bereavement Leave',
+  'Sick Leave',
+  'Training Leave',
+  'Official Business',
+  'Work From Home',
+  'Birthday Leave',
+  'Emergency Leave',
+  'Maternity Leave',
+  'Solo Parent Leave',
+  'Special Leave for Women',
+  'Paternity Leave',
+  'Study Leave With Pay',
+  'Study Leave Without Pay',
+  'Leave Without Pay',
+  'Research Leave',
+];
 
 double _toDouble(dynamic value) {
   if (value is num) {
@@ -252,39 +276,84 @@ double _toDouble(dynamic value) {
   return double.tryParse(value?.toString() ?? '') ?? 0;
 }
 
-String _normalizedLeaveType(String value) {
-  return value.trim().toLowerCase();
+/// PHP `rtrim(rtrim(number_format($v, $decimals, '.', ''), '0'), '.')`.
+String _formatDays(dynamic value, {int decimals = 2}) {
+  final fixed = _toDouble(value).toStringAsFixed(decimals);
+  if (!fixed.contains('.')) return fixed;
+  return fixed.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
 }
 
-String _prettyLeaveType(String value) {
-  final normalized = value.trim();
-  if (normalized.isEmpty) {
-    return 'Leave';
+DateTime? _dateOnly(dynamic value) {
+  final parsed = DateTime.tryParse((value ?? '').toString());
+  return parsed == null ? null : DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+/// Web `currentEmploymentYearStart()`: this year's hire anniversary, or last
+/// year's if it is still in the future; Jan 1 when there is no hire date.
+/// Evaluated in Asia/Manila (UTC+8), the web app's timezone.
+DateTime _currentEmploymentYearStart(dynamic hireDateValue) {
+  final manila = DateTime.now().toUtc().add(const Duration(hours: 8));
+  final now = DateTime(
+    manila.year,
+    manila.month,
+    manila.day,
+    manila.hour,
+    manila.minute,
+    manila.second,
+  );
+  final hireDate = _dateOnly(hireDateValue);
+  if (hireDate == null) {
+    return DateTime(now.year, 1, 1);
   }
 
-  return normalized
-      .replaceAll(RegExp(r'[_-]+'), ' ')
-      .split(RegExp(r'\s+'))
-      .where((part) => part.isNotEmpty)
-      .map(
-        (part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
-      )
-      .join(' ');
+  final anniversary = DateTime(now.year, hireDate.month, hireDate.day);
+  return anniversary.isAfter(now)
+      ? DateTime(now.year - 1, hireDate.month, hireDate.day)
+      : anniversary;
 }
 
-bool _isApprovedLeave(String status) {
-  return status.trim().toLowerCase() == 'approved';
-}
-
-bool _isDeductibleLeaveType(String type) {
-  final normalized = _normalizedLeaveType(type);
-  return normalized.contains('vacation') ||
-      normalized.contains('sick') ||
-      normalized.contains('emergency');
-}
-
-Map<String, double> _buildLeaveUsageSummary(
+/// Web `getLeaveUsageBreakdown()`: approved requests only, matched by exact
+/// leave type. Deductible types only count requests starting in the current
+/// employment year; tracked types count all approved requests. `count` is
+/// the number of approved requests of that type.
+Map<String, List<Map<String, dynamic>>> _buildLeaveUsageBreakdown(
   List<Map<String, dynamic>> requests,
+  DateTime employmentYearStart,
+) {
+  final approvedByType = <String, List<Map<String, dynamic>>>{};
+  for (final request in requests) {
+    if ((request['status'] ?? '').toString() != 'approved') continue;
+    final type = (request['leave_type'] ?? '').toString();
+    approvedByType.putIfAbsent(type, () => []).add(request);
+  }
+
+  final deductible = <Map<String, dynamic>>[];
+  final trackedOnly = <Map<String, dynamic>>[];
+
+  for (final type in _allLeaveTypes) {
+    final approved = approvedByType[type] ?? const [];
+    final isDeductible = _deductibleLeaveTypes.contains(type);
+    final counted = isDeductible
+        ? approved.where((request) {
+            final start = _dateOnly(request['start_date']);
+            return start != null && !start.isBefore(employmentYearStart);
+          })
+        : approved;
+    final daysUsed = counted.fold<double>(
+      0,
+      (sum, request) => sum + _toDouble(request['days_deducted']),
+    );
+
+    final entry = {'type': type, 'days_used': daysUsed, 'count': approved.length};
+    (isDeductible ? deductible : trackedOnly).add(entry);
+  }
+
+  return {'deductible': deductible, 'tracked_only': trackedOnly};
+}
+
+/// Web "Leave Usage Summary": derived from the deductible breakdown.
+Map<String, double> _buildLeaveUsageSummary(
+  Map<String, List<Map<String, dynamic>>> breakdown,
 ) {
   final usage = <String, double>{
     'Vacation Used': 0,
@@ -292,159 +361,38 @@ Map<String, double> _buildLeaveUsageSummary(
     'Emergency Used': 0,
   };
 
-  for (final request in requests) {
-    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
-      continue;
-    }
-
-    final leaveType = _normalizedLeaveType(
-      (request['leave_type'] ?? '').toString(),
-    );
-    final daysUsed = _toDouble(request['days_deducted']);
-
-    if (leaveType.contains('vacation')) {
-      usage['Vacation Used'] = usage['Vacation Used']! + daysUsed;
-    } else if (leaveType.contains('sick')) {
-      usage['Sick Used'] = usage['Sick Used']! + daysUsed;
-    } else if (leaveType.contains('emergency')) {
-      usage['Emergency Used'] = usage['Emergency Used']! + daysUsed;
+  for (final entry in breakdown['deductible'] ?? const []) {
+    final type = (entry['type'] ?? '').toString().toLowerCase();
+    final days = _toDouble(entry['days_used']);
+    if (type.contains('vacation')) {
+      usage['Vacation Used'] = usage['Vacation Used']! + days;
+    } else if (type.contains('sick')) {
+      usage['Sick Used'] = usage['Sick Used']! + days;
+    } else if (type.contains('emergency')) {
+      usage['Emergency Used'] = usage['Emergency Used']! + days;
     }
   }
 
   return usage;
 }
 
-Map<String, List<Map<String, dynamic>>> _buildLeaveUsageBreakdown(
-  List<Map<String, dynamic>> requests,
-) {
-  final deductible = <String, Map<String, dynamic>>{};
-  final trackedOnly = <String, Map<String, dynamic>>{};
-
-  void accumulate(
-    Map<String, Map<String, dynamic>> target,
-    String label,
-    double daysUsed,
-  ) {
-    final current = target[label];
-    if (current == null) {
-      target[label] = {'type': label, 'days_used': daysUsed, 'count': 1};
-      return;
-    }
-
-    current['days_used'] = _toDouble(current['days_used']) + daysUsed;
-    current['count'] = (current['count'] as int) + 1;
-  }
-
-  for (final request in requests) {
-    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
-      continue;
-    }
-
-    final leaveTypeRaw = (request['leave_type'] ?? '').toString();
-    final leaveType = _normalizedLeaveType(leaveTypeRaw);
-    final label = _prettyLeaveType(leaveTypeRaw);
-    final daysUsed = _toDouble(request['days_deducted']);
-
-    if (daysUsed <= 0) {
-      continue;
-    }
-
-    if (_isDeductibleLeaveType(leaveType)) {
-      accumulate(deductible, label, daysUsed);
-    } else {
-      accumulate(trackedOnly, label, daysUsed);
-    }
-  }
-
-  return {
-    'deductible': deductible.values.toList(),
-    'tracked_only': trackedOnly.values.toList(),
-  };
-}
-
-Map<String, Map<String, dynamic>> _buildRemainingBalanceSummary(
+/// Web `getDeductibleLeaveBalances()`: stored `leave_balances` rows for the
+/// deductible types, ordered by leave type.
+List<Map<String, dynamic>> _deductibleBalances(
   List<Map<String, dynamic>> balances,
-  List<Map<String, dynamic>> requests,
 ) {
-  final totalByType = <String, double>{};
-
-  for (final request in requests) {
-    if (!_isApprovedLeave((request['status'] ?? '').toString())) {
-      continue;
-    }
-
-    final leaveType = _normalizedLeaveType(
-      (request['leave_type'] ?? '').toString(),
+  return balances
+      .where(
+        (row) => _deductibleLeaveTypes.contains(
+          (row['leave_type'] ?? '').toString(),
+        ),
+      )
+      .toList()
+    ..sort(
+      (left, right) => (left['leave_type'] ?? '').toString().compareTo(
+        (right['leave_type'] ?? '').toString(),
+      ),
     );
-    final daysUsed = _toDouble(request['days_deducted']);
-
-    if (leaveType.contains('vacation')) {
-      totalByType['vacation'] = (totalByType['vacation'] ?? 0) + daysUsed;
-    } else if (leaveType.contains('sick')) {
-      totalByType['sick'] = (totalByType['sick'] ?? 0) + daysUsed;
-    } else if (leaveType.contains('emergency')) {
-      totalByType['emergency'] = (totalByType['emergency'] ?? 0) + daysUsed;
-    }
-  }
-
-  final result = <String, Map<String, dynamic>>{};
-
-  for (final type in const ['emergency', 'sick', 'vacation']) {
-    final balanceRow = balances.cast<Map<String, dynamic>>().firstWhere(
-      (row) => _normalizedLeaveType(
-        (row['leave_type'] ?? '').toString(),
-      ).contains(type),
-      orElse: () => <String, dynamic>{
-        'leave_type': '${type[0].toUpperCase()}${type.substring(1)} Leave',
-        'remaining_days': 0,
-      },
-    );
-
-    final label = (balanceRow['leave_type'] ?? '').toString();
-    final remainingDays = _remainingDays(balanceRow['remaining_days']);
-
-    result[type] = {
-      'label': label.isEmpty
-          ? '${type[0].toUpperCase()}${type.substring(1)} Leave'
-          : label,
-      'remaining_days': remainingDays,
-      'used_days': _formatDaysUsed(totalByType[type] ?? 0),
-    };
-  }
-
-  return result;
-}
-
-String _formatDaysUsed(dynamic value) {
-  final days = _toDouble(value);
-  if (days == days.roundToDouble()) {
-    return days.toInt().toString();
-  }
-  return days.toStringAsFixed(1);
-}
-
-DateTime _parseNewestDate(Map<String, dynamic> item) {
-  final candidates = [
-    item['updated_at']?.toString(),
-    item['created_at']?.toString(),
-  ];
-
-  for (final candidate in candidates) {
-    if (candidate == null || candidate.isEmpty) {
-      continue;
-    }
-
-    final parsed = DateTime.tryParse(candidate);
-    if (parsed != null) {
-      return parsed;
-    }
-  }
-
-  return DateTime.fromMillisecondsSinceEpoch(0);
-}
-
-int _compareNewestFirst(Map<String, dynamic> left, Map<String, dynamic> right) {
-  return _parseNewestDate(right).compareTo(_parseNewestDate(left));
 }
 
 class _LeaveUsageSummaryPanel extends StatelessWidget {
@@ -470,8 +418,8 @@ class _LeaveUsageSummaryPanel extends StatelessWidget {
           children: [
             Expanded(
               child: _UsageSummaryCard(
-                label: 'Vacation',
-                value: _formatDaysUsed(usageSummary['Vacation Used']),
+                label: 'Vacation Used',
+                value: _formatDays(usageSummary['Vacation Used'], decimals: 1),
                 foreground: const Color(0xFF1F8A46),
                 background: const Color(0xFFE7F8EC),
                 border: const Color(0xFFBFE6CD),
@@ -480,8 +428,8 @@ class _LeaveUsageSummaryPanel extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: _UsageSummaryCard(
-                label: 'Sick',
-                value: _formatDaysUsed(usageSummary['Sick Used']),
+                label: 'Sick Used',
+                value: _formatDays(usageSummary['Sick Used'], decimals: 1),
                 foreground: const Color(0xFFB7791F),
                 background: const Color(0xFFFFF4DD),
                 border: const Color(0xFFF1D79B),
@@ -490,8 +438,8 @@ class _LeaveUsageSummaryPanel extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: _UsageSummaryCard(
-                label: 'Emergency',
-                value: _formatDaysUsed(usageSummary['Emergency Used']),
+                label: 'Emergency Used',
+                value: _formatDays(usageSummary['Emergency Used'], decimals: 1),
                 foreground: const Color(0xFF7C3AED),
                 background: const Color(0xFFF1E9FF),
                 border: const Color(0xFFDCC8FF),
@@ -557,27 +505,19 @@ class _UsageSummaryCard extends StatelessWidget {
 class _RemainingBalanceSection extends StatelessWidget {
   const _RemainingBalanceSection({required this.balances});
 
-  final Map<String, Map<String, dynamic>> balances;
+  /// Stored `leave_balances` rows (deductible types, ordered by type).
+  final List<Map<String, dynamic>> balances;
 
   @override
   Widget build(BuildContext context) {
+    const accents = [Color(0xFF2B57D1), Color(0xFF1D4ED8), Color(0xFF1E40AF)];
     final cards = [
-      _RemainingBalanceCard(
-        label: (balances['emergency']?['label'] ?? 'Emergency Leave')
-            .toString(),
-        value: (balances['emergency']?['remaining_days'] ?? '0').toString(),
-        accent: const Color(0xFF2B57D1),
-      ),
-      _RemainingBalanceCard(
-        label: (balances['sick']?['label'] ?? 'Sick Leave').toString(),
-        value: (balances['sick']?['remaining_days'] ?? '0').toString(),
-        accent: const Color(0xFF1D4ED8),
-      ),
-      _RemainingBalanceCard(
-        label: (balances['vacation']?['label'] ?? 'Vacation Leave').toString(),
-        value: (balances['vacation']?['remaining_days'] ?? '0').toString(),
-        accent: const Color(0xFF1E40AF),
-      ),
+      for (var i = 0; i < balances.length; i++)
+        _RemainingBalanceCard(
+          label: (balances[i]['leave_type'] ?? '').toString(),
+          value: _formatDays(balances[i]['remaining_days']),
+          accent: accents[i % accents.length],
+        ),
     ];
 
     return Column(
@@ -701,29 +641,26 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          if (deductible.isEmpty && trackedOnly.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Text(
-                'No approved leave usage yet.',
-                style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
-              ),
-            ),
           if (deductible.isNotEmpty) ...[
             const Text(
-              'Affects Balance',
+              'LEAVES THAT AFFECT BALANCE',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
                 color: Color(0xFF15803D),
               ),
             ),
             const SizedBox(height: 6),
+            // Web: shown with usage when count > 0 or days_used > 0.
             ...deductible.map(
               (usage) => _UsageBreakdownCard(
                 type: (usage['type'] ?? 'Leave').toString(),
-                daysUsed: _formatDaysUsed(usage['days_used']),
+                daysUsed: _formatDays(usage['days_used']),
                 count: (usage['count'] ?? 0) as int,
+                hasUsage:
+                    ((usage['count'] ?? 0) as int) > 0 ||
+                    _toDouble(usage['days_used']) > 0,
                 background: const Color(0xFFF0FAF3),
                 border: const Color(0xFFCFECD6),
                 titleColor: const Color(0xFF14532D),
@@ -734,23 +671,36 @@ class _LeaveUsageBreakdownPanel extends StatelessWidget {
           ],
           if (trackedOnly.isNotEmpty) ...[
             const Text(
-              'Tracked Only',
+              'TRACKED LEAVES (BALANCE NOT AFFECTED)',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
                 color: Color(0xFF475569),
               ),
             ),
             const SizedBox(height: 6),
+            // Web: shown with usage only when count > 0.
             ...trackedOnly.map(
               (usage) => _UsageBreakdownCard(
                 type: (usage['type'] ?? 'Leave').toString(),
-                daysUsed: _formatDaysUsed(usage['days_used']),
+                daysUsed: _formatDays(usage['days_used']),
                 count: (usage['count'] ?? 0) as int,
+                hasUsage: ((usage['count'] ?? 0) as int) > 0,
                 background: const Color(0xFFF8FAFC),
                 border: const Color(0xFFE2E8F0),
                 titleColor: const Color(0xFF0F172A),
                 valueColor: const Color(0xFF334155),
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Note: These leaves are tracked for record-keeping but do not '
+              'reduce your leave balance.',
+              style: TextStyle(
+                fontSize: 11,
+                fontStyle: FontStyle.italic,
+                color: Color(0xFF64748B),
               ),
             ),
           ],
@@ -765,6 +715,7 @@ class _UsageBreakdownCard extends StatelessWidget {
     required this.type,
     required this.daysUsed,
     required this.count,
+    required this.hasUsage,
     required this.background,
     required this.border,
     required this.titleColor,
@@ -774,6 +725,7 @@ class _UsageBreakdownCard extends StatelessWidget {
   final String type;
   final String daysUsed;
   final int count;
+  final bool hasUsage;
   final Color background;
   final Color border;
   final Color titleColor;
@@ -781,6 +733,14 @@ class _UsageBreakdownCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Web dims unused types and shows "0 / No usage".
+    return Opacity(
+      opacity: hasUsage ? 1 : 0.5,
+      child: _buildCard(),
+    );
+  }
+
+  Widget _buildCard() {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -804,7 +764,7 @@ class _UsageBreakdownCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '$count request(s)',
+                  hasUsage ? '$count request(s)' : 'No usage',
                   style: const TextStyle(
                     color: Color(0xFF64748B),
                     fontSize: 11,
@@ -814,7 +774,7 @@ class _UsageBreakdownCard extends StatelessWidget {
             ),
           ),
           Text(
-            daysUsed,
+            hasUsage ? daysUsed : '0',
             style: TextStyle(
               color: valueColor,
               fontWeight: FontWeight.w800,
@@ -839,17 +799,11 @@ class _LeaveHistoryCard extends StatelessWidget {
     final startDate = (request['start_date'] ?? '').toString();
     final endDate = (request['end_date'] ?? '').toString();
     final cutoffDate = (request['cutoff_date'] ?? '').toString();
-    final reason = (request['reason'] ?? leaveType).toString();
-    final daysDeducted = (request['days_deducted'] ?? '').toString();
-    final displayReason = reason
-        .replaceFirst(
-          RegExp(
-            r'\s*[·•\-|]?\s*source\s+status\s*:\s*.*$',
-            caseSensitive: false,
-          ),
-          '',
-        )
-        .trim();
+    // Shown exactly as the web table (including "· Source status: …").
+    final reason = (request['reason'] ?? '').toString().trim();
+    final daysDeducted = request['days_deducted'] == null
+        ? ''
+        : _formatDays(request['days_deducted']);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -885,7 +839,7 @@ class _LeaveHistoryCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '${_formatDate(startDate)} – ${_formatDate(endDate)}',
+            '${_historyDate(startDate)} – ${_historyDate(endDate)}',
             style: const TextStyle(
               fontSize: 12,
               color: Color(0xFF334155),
@@ -903,19 +857,30 @@ class _LeaveHistoryCard extends StatelessWidget {
               ),
               _MetaItem(
                 icon: Icons.schedule_rounded,
-                label: 'Cut-off: ${_formatDate(cutoffDate)}',
+                label: 'Cut-off: ${_historyCutoff(cutoffDate)}',
               ),
             ],
           ),
-          if (displayReason.isNotEmpty &&
-              displayReason.toLowerCase() != leaveType.toLowerCase()) ...[
+          if (reason.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              displayReason,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF64748B),
-                height: 1.3,
+            // `leave_requests.reason`, exactly as the web Reason column.
+            Text.rich(
+              TextSpan(
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF64748B),
+                  height: 1.3,
+                ),
+                children: [
+                  const TextSpan(
+                    text: 'Reason: ',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF475569),
+                    ),
+                  ),
+                  TextSpan(text: reason),
+                ],
               ),
             ),
           ],
@@ -1002,6 +967,45 @@ class _EmptyHistoryCard extends StatelessWidget {
             fontWeight: FontWeight.w600,
             fontSize: 13,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Same wording as the current web Leave Monitoring disclaimer.
+class _Disclaimer extends StatelessWidget {
+  const _Disclaimer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: const Text.rich(
+        TextSpan(
+          style: TextStyle(
+            color: Color(0xFF92400E),
+            fontSize: 12.5,
+            height: 1.35,
+          ),
+          children: [
+            TextSpan(
+              text: 'Disclaimer: ',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            TextSpan(
+              text:
+                  'Leave counts shown here are converted to days, not hours. '
+                  'Please view your NUIS account for the most accurate leave '
+                  'hours.',
+            ),
+          ],
         ),
       ),
     );

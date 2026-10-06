@@ -46,20 +46,18 @@ abstract class AppApiClient {
   });
   Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions();
 
-  // Employee credentials
-  Future<List<Map<String, dynamic>>> getEmployeeCredentials();
+  // Privacy Notice (same acknowledgment record the web portal writes)
+  Future<void> acknowledgePrivacyNotice({required String version});
+
+  // Academic degrees (read-only; submissions happen on the web portal)
+  Future<List<Map<String, dynamic>>> getEmployeeDegrees();
+
+  // Files in the shared "credentials" storage bucket (used by WFH monitoring)
   Future<String?> getCredentialFileUrl(String storedPath);
   Future<String> uploadEmployeeCredentialFile({
     required dynamic employeeId,
     dynamic employeeAlternateId,
     required Uint8List fileBytes,
     required String originalFileName,
-  });
-  Future<Map<String, dynamic>> createEmployeeCredential(
-    Map<String, dynamic> payload,
-  );
-  Future<void> deleteEmployeeCredential({
-    required dynamic id,
-    String? filePath,
   });
 }

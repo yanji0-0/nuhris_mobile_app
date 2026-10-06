@@ -181,7 +181,7 @@ class _SignInScreenState extends State<SignInScreen> {
                               ),
                               SizedBox(height: 12),
                               Text(
-                                'Streamline employee records, attendance tracking, and credential monitoring in one place.',
+                                'Stay connected with your HR information, attendance, and announcements in one place.',
                                 style: TextStyle(
                                   color: Color(0xDDE8EEFA),
                                   fontSize: 13,

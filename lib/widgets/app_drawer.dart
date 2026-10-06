@@ -59,12 +59,6 @@ class AppDrawer extends ConsumerWidget {
                         onTap: () => onSelect(AppNavItem.dashboard),
                       ),
                       _DrawerItem(
-                        icon: Icons.badge_outlined,
-                        label: 'Credentials',
-                        selected: selected == AppNavItem.credentials,
-                        onTap: () => onSelect(AppNavItem.credentials),
-                      ),
-                      _DrawerItem(
                         icon: Icons.calendar_month_outlined,
                         label: 'Academic Calendar',
                         selected: selected == AppNavItem.academicCalendar,
@@ -96,7 +90,7 @@ class AppDrawer extends ConsumerWidget {
                       ),
                       _DrawerItem(
                         icon: Icons.person_outline,
-                        label: 'Account',
+                        label: 'Profile',
                         selected: selected == AppNavItem.account,
                         onTap: () => onSelect(AppNavItem.account),
                       ),

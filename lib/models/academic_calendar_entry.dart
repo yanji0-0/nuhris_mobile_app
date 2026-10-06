@@ -50,14 +50,15 @@ class AcademicCalendarEntry {
   bool get isWorkingDay => dayType == 'working';
   bool get isNonWorkingDay => dayType == 'non_working';
 
+  /// Matches the web `AcademicCalendarEntry::type_label` accessor.
   String get entryTypeLabel {
     switch (entryType) {
+      case 'wfh_class_suspension':
+        return 'WFH / Class Suspension';
       case 'holiday':
         return 'Holiday';
-      case 'event':
-        return 'Event';
       default:
-        return _titleCase(entryType);
+        return 'Event';
     }
   }
 
