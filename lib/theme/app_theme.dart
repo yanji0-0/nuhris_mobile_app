@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   static const navy = Color(0xFF063A63); // deep blue/navy
@@ -29,11 +28,11 @@ ThemeData buildAppTheme() {
     useMaterial3: true,
     colorSchemeSeed: AppColors.primaryBlue,
     brightness: Brightness.light,
+    // Inter is bundled in assets/fonts (no runtime download from Google).
+    fontFamily: 'Inter',
   );
 
   return base.copyWith(
-    textTheme: GoogleFonts.interTextTheme(base.textTheme),
-    primaryTextTheme: GoogleFonts.interTextTheme(base.primaryTextTheme),
     scaffoldBackgroundColor: AppColors.pageBg,
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.navy,

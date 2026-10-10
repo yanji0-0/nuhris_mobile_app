@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../navigation/app_nav.dart';
 import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
+import '../utils/app_log.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/confirm_identity_dialog.dart';
 import '../widgets/nuhris_app_bar.dart';
 
 class AttendanceDtrScreen extends ConsumerStatefulWidget {
@@ -39,8 +42,14 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
     _future = _loadAttendanceDtr();
   }
 
-  Future<List<Map<String, dynamic>>> _loadAttendanceDtr() {
-    return ref.read(apiClientProvider).getAttendanceDtr();
+  /// Last successfully loaded records, kept on screen while the periodic
+  /// background refresh re-fetches, so the page (and scroll) never resets.
+  List<Map<String, dynamic>>? _lastRecords;
+
+  Future<List<Map<String, dynamic>>> _loadAttendanceDtr() async {
+    final records = await ref.read(apiClientProvider).getAttendanceDtr();
+    _lastRecords = records;
+    return records;
   }
 
   void _syncRefreshToken(int refreshToken) {
@@ -86,23 +95,29 @@ class _AttendanceDtrScreenState extends ConsumerState<AttendanceDtrScreen> {
           FutureBuilder<List<Map<String, dynamic>>>(
             future: _future,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 80),
-                  child: Center(child: CircularProgressIndicator()),
-                );
+              // Spinner/error only before the first successful load; a
+              // background refresh keeps showing the previous records.
+              final cached = snapshot.data ?? _lastRecords;
+              if (cached == null) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.only(top: 80),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 40),
+                    child: Center(
+                      child: Text(userMessageFor(snapshot.error)),
+                    ),
+                  );
+                }
+              } else if (snapshot.hasError) {
+                appLog('DTR background refresh failed', snapshot.error.runtimeType);
               }
 
-              if (snapshot.hasError) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 40),
-                  child: Center(
-                    child: Text('Failed to load records: ${snapshot.error}'),
-                  ),
-                );
-              }
-
-              final records = snapshot.data ?? const [];
+              final records = cached ?? const <Map<String, dynamic>>[];
               if (!_didSyncVisibleMonth && records.isNotEmpty) {
                 final latestRecordMonth = _parseRecordMonth(records.first);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1316,7 +1331,7 @@ class _WeeklyScheduleComposerState
     });
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final missingDay = _days.firstWhere(
       (day) => day.isWithWork && (day.timeIn == null || day.timeOut == null),
       orElse: () => _ScheduleDayState(
@@ -1335,6 +1350,14 @@ class _WeeklyScheduleComposerState
       );
       return;
     }
+
+    // Submitting a schedule to HR is a sensitive operation: confirm identity.
+    final confirmed = await confirmIdentity(
+      context,
+      ref,
+      action: 'submit this schedule',
+    );
+    if (!confirmed || !mounted) return;
 
     setState(() => _isSubmitting = true);
     final payload = _days
@@ -1376,7 +1399,7 @@ class _WeeklyScheduleComposerState
           if (!mounted) {
             return;
           }
-          final message = error?.toString() ?? 'Failed to submit';
+          final message = userMessageFor(error);
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text(message)));

@@ -1,13 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:bcrypt/bcrypt.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
 import '../models/academic_calendar_entry.dart';
+import '../utils/app_log.dart';
+import '../utils/upload_validation.dart';
 import 'api_client_contract.dart';
 
 class ApiClient implements AppApiClient {
@@ -16,32 +16,53 @@ class ApiClient implements AppApiClient {
   static final ApiClient instance = ApiClient._();
 
   final SupabaseClient _client = Supabase.instance.client;
-  bool _fallbackAuthenticated = false;
   Map<String, dynamic>? _user;
 
-  bool get isAuthenticated =>
-      _client.auth.currentSession != null || _fallbackAuthenticated;
+  bool get isAuthenticated => _client.auth.currentSession != null;
   Map<String, dynamic>? get currentUser => _user;
 
   static const int _employeeUserType = 3;
   static const String _loginFailedMessage =
       'These credentials do not match our records.';
-  static const String _profilePhotoBucket = 'credentials';
-  static const String _profilePhotoPathPrefix = 'credentials/';
-  static const List<String> _credentialFilesBuckets = [
-    'CREDENTIALS',
-    'employee_credentials',
-    'employee-credentials',
-    'credentials',
-    'uploads',
-  ];
-  static const List<String> _profilePhotoBuckets = [
-    'credentials',
-    'profile-photos',
-    'profile_photos',
-    'avatars',
-    'uploads',
-  ];
+
+  /// Private bucket shared with the web portal (credentials, degrees, WFH).
+  static const String _filesBucket = 'credentials';
+
+  /// Lifetime of signed URLs for documents and profile photos.
+  static const int _documentUrlSeconds = 300;
+  static const int _photoUrlSeconds = 60 * 60;
+
+  /// Only the columns the app displays (no password/remember_token, and no
+  /// phone/address, which the employee app never shows).
+  static const String _userColumns = 'id,name,email,user_type';
+  static const String _employeeColumns =
+      'id,employee_id,first_name,last_name,email,department_id,position,'
+      'employment_type,ranking,status,hire_date,official_time_in,'
+      'official_time_out,auth_id,profilephoto_path';
+
+  /// Runs a backend operation and converts any unexpected error into a
+  /// user-safe [ApiException]. Technical details (Postgrest/RLS/storage
+  /// messages, object keys) are only logged in debug builds.
+  Future<T> _guard<T>(
+    String operation,
+    String userMessage,
+    Future<T> Function() body,
+  ) async {
+    try {
+      return await body();
+    } on ApiException {
+      rethrow;
+    } on PostgrestException catch (error) {
+      appLog('$operation failed (code ${error.code})', error.message);
+      throw ApiException(userMessage);
+    } on StorageException catch (error) {
+      appLog('$operation failed (status ${error.statusCode})', error.message);
+      throw ApiException(userMessage);
+    } catch (error) {
+      appLog('$operation failed', error);
+      throw ApiException(userMessage);
+    }
+  }
 
   @override
   Future<bool> hasEmployeeAccess() async {
@@ -64,14 +85,18 @@ class ApiClient implements AppApiClient {
       }
 
       return true;
-    } catch (_) {
+    } catch (error) {
       // Fall through and force logout for unresolved or invalid user records.
+      appLog('Employee access check failed', error.runtimeType);
     }
 
     await logout();
     return false;
   }
 
+  /// Supabase Auth is the only authentication mechanism. Passwords are never
+  /// read, compared or stored on the device; accounts are provisioned by the
+  /// web portal (Supabase Auth Admin API), never from the app.
   @override
   Future<void> login({required String email, required String password}) async {
     final normalizedEmail = email.trim().toLowerCase();
@@ -80,79 +105,73 @@ class ApiClient implements AppApiClient {
       throw ApiException('Email and password are required.');
     }
 
-    AuthResponse authResult;
     try {
-      authResult = await _client.auth.signInWithPassword(
+      await _client.auth.signInWithPassword(
         email: normalizedEmail,
         password: password,
       );
+    } on AuthRetryableFetchException catch (error) {
+      appLog('Sign-in network error', error.statusCode);
+      throw ApiException(
+        'Unable to reach the server. Check your connection and try again.',
+      );
+    } on AuthException catch (error) {
+      appLog('Sign-in rejected (${error.code ?? error.statusCode})');
+      switch (error.code) {
+        case 'email_not_confirmed':
+          throw ApiException('Please verify your email before signing in.');
+        case 'over_request_rate_limit':
+        case 'over_email_send_rate_limit':
+          throw ApiException(
+            'Too many sign-in attempts. Please wait a moment and try again.',
+          );
+        default:
+          throw ApiException(_loginFailedMessage);
+      }
     } catch (error) {
-      // Fallback to public users table login for projects not using Supabase Auth.
-      final rows = await _client
-          .from('users')
-          .select('*')
-          .ilike('email', normalizedEmail)
-          .limit(1);
-
-      if (rows.isEmpty) {
-        throw ApiException('No account found for this email.');
-      }
-
-      final row = (rows.first as Map).cast<String, dynamic>();
-      final storedPassword = (row['password'] ?? '').toString();
-      final isBcrypt = storedPassword.startsWith(r'$2');
-      final isValid = isBcrypt
-          ? BCrypt.checkpw(password, storedPassword)
-          : password == storedPassword;
-
-      if (!isValid) {
-        throw ApiException('The provided credentials are incorrect.');
-      }
-
-      final userType = _parseUserType(row['user_type']);
-      if (userType != _employeeUserType) {
-        throw ApiException(_loginFailedMessage);
-      }
-
-      _fallbackAuthenticated = true;
-      _user = row;
-
-      final employee = await _currentEmployee();
-      if (employee == null) {
-        await logout();
-        throw ApiException(_loginFailedMessage);
-      }
-
-      final employeeId = employee['id'];
-      if (employeeId != null) {
-        await _provisionAuthUserIfMissing(
-          email: normalizedEmail,
-          password: password,
-          employeeId: employeeId,
-        );
-      }
-      return;
+      appLog('Sign-in failed', error.runtimeType);
+      throw ApiException('Unable to sign in right now. Please try again.');
     }
 
-    _fallbackAuthenticated = false;
-    await _loadCurrentUserFromTable(normalizedEmail);
+    _user = null;
+    final allowed = await _guard(
+      'Load signed-in profile',
+      'Unable to load your employee profile. Please try again.',
+      () async {
+        await _loadCurrentUserFromTable(normalizedEmail);
+        final userType = _parseUserType(_user?['user_type']);
+        if (userType != null && userType != _employeeUserType) {
+          return false;
+        }
+        return await _currentEmployee() != null;
+      },
+    );
 
-    final currentUserType = _parseUserType(_user?['user_type']);
-    if (currentUserType != null && currentUserType != _employeeUserType) {
+    if (!allowed) {
       await logout();
       throw ApiException(_loginFailedMessage);
     }
+  }
 
-    final employee = await _currentEmployee();
-    if (employee == null) {
-      await logout();
-      throw ApiException(_loginFailedMessage);
-    }
-
-    final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
-    final employeeId = employee['id'];
-    if (authUserId != null && authUserId.isNotEmpty && employeeId != null) {
-      await _syncEmployeeAuthId(employeeId: employeeId, authUserId: authUserId);
+  /// Confirms the signed-in employee's password with Supabase Auth before a
+  /// sensitive operation (step-up authentication). Nothing is stored.
+  @override
+  Future<bool> reauthenticate(String password) async {
+    final email = _client.auth.currentUser?.email;
+    if (email == null || email.isEmpty || password.isEmpty) return false;
+    try {
+      final result = await _client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+      return result.session != null;
+    } on AuthRetryableFetchException {
+      throw ApiException(
+        'Unable to reach the server. Check your connection and try again.',
+      );
+    } on AuthException catch (error) {
+      appLog('Re-authentication rejected (${error.code ?? error.statusCode})');
+      return false;
     }
   }
 
@@ -160,10 +179,10 @@ class ApiClient implements AppApiClient {
   Future<void> logout() async {
     try {
       await _client.auth.signOut();
-    } catch (_) {
-      // Ignore logout errors and clear local state below.
+    } catch (error) {
+      // Ignore logout errors; the local session is cleared below.
+      appLog('Sign-out request failed', error.runtimeType);
     } finally {
-      _fallbackAuthenticated = false;
       _user = null;
     }
   }
@@ -172,152 +191,131 @@ class ApiClient implements AppApiClient {
   /// days per cutoff of the current month and the latest approved schedule.
   /// Recent alerts and the academic calendar come from their own providers.
   @override
-  Future<Map<String, dynamic>> getDashboard() async {
-    final user = await _currentUserRow();
-    final employee = await _currentEmployee();
-    if (employee == null) {
-      throw ApiException('Employee profile not found.');
-    }
+  Future<Map<String, dynamic>> getDashboard() => _guard(
+        'Load dashboard',
+        'Unable to load your dashboard. Please try again.',
+        () async {
+          final user = await _currentUserRow();
+          final employeeId = await _requireEmployeeId();
 
-    final employeeId = _toIntId(employee['id']);
-    if (employeeId == null) {
-      throw ApiException('Employee profile not found.');
-    }
+          // The web app runs on Asia/Manila (UTC+8, no DST), so the cutoffs
+          // are resolved against Manila's calendar date, not the device clock.
+          final manilaNow =
+              DateTime.now().toUtc().add(const Duration(hours: 8));
+          final year = manilaNow.year;
+          final month = manilaNow.month;
+          final lastDay = DateTime(year, month + 1, 0).day;
 
-    // The web app runs on Asia/Manila (UTC+8, no DST), so the cutoffs are
-    // resolved against Manila's calendar date rather than the device clock.
-    final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
-    final year = manilaNow.year;
-    final month = manilaNow.month;
-    final lastDay = DateTime(year, month + 1, 0).day;
+          String isoDate(int day) =>
+              '${year.toString().padLeft(4, '0')}-'
+              '${month.toString().padLeft(2, '0')}-'
+              '${day.toString().padLeft(2, '0')}';
 
-    String isoDate(int day) =>
-        '${year.toString().padLeft(4, '0')}-'
-        '${month.toString().padLeft(2, '0')}-'
-        '${day.toString().padLeft(2, '0')}';
+          Future<int> countPresentDays(int fromDay, int toDay) async {
+            final rows = await _client
+                .from('attendance_records')
+                .select('id')
+                .eq('employee_id', employeeId)
+                .eq('status', 'present')
+                .gte('record_date', isoDate(fromDay))
+                .lte('record_date', isoDate(toDay));
+            return rows.length;
+          }
 
-    Future<int> countPresentDays(int fromDay, int toDay) async {
-      final rows = await _client
-          .from('attendance_records')
-          .select('id')
-          .eq('employee_id', employeeId)
-          .eq('status', 'present')
-          .gte('record_date', isoDate(fromDay))
-          .lte('record_date', isoDate(toDay));
-      return rows.length;
-    }
+          final presentDays = await Future.wait([
+            countPresentDays(1, 15),
+            countPresentDays(16, lastDay),
+          ]);
 
-    final presentDays = await Future.wait([
-      countPresentDays(1, 15),
-      countPresentDays(16, lastDay),
-    ]);
+          // Same ordering as Eloquent's latest('reviewed_at')->latest(
+          // 'updated_at') on Postgres, where DESC places NULLs first.
+          final scheduleRows = await _client
+              .from('employee_schedule_submissions')
+              .select(
+                'id,term_label,semester_label,status,reviewed_at,updated_at',
+              )
+              .eq('employee_id', employeeId)
+              .eq('status', 'approved')
+              .order('reviewed_at', ascending: false, nullsFirst: true)
+              .order('updated_at', ascending: false, nullsFirst: true)
+              .limit(1);
+          final scheduleList = _toMapList(scheduleRows);
 
-    // Same ordering as Eloquent's latest('reviewed_at')->latest('updated_at')
-    // on Postgres, where DESC places NULLs first.
-    final scheduleRows = await _client
-        .from('employee_schedule_submissions')
-        .select('id,term_label,semester_label,status,reviewed_at,updated_at')
-        .eq('employee_id', employeeId)
-        .eq('status', 'approved')
-        .order('reviewed_at', ascending: false, nullsFirst: true)
-        .order('updated_at', ascending: false, nullsFirst: true)
-        .limit(1);
-    final scheduleList = _toMapList(scheduleRows);
-
-    return {
-      'user': user,
-      'employee': employee,
-      'present_days': {
-        'first_cutoff': presentDays[0],
-        'second_cutoff': presentDays[1],
-      },
-      'latest_approved_schedule': scheduleList.isEmpty
-          ? null
-          : scheduleList.first,
-    };
-  }
+          return {
+            'user': user,
+            'employee': await _currentEmployee(),
+            'present_days': {
+              'first_cutoff': presentDays[0],
+              'second_cutoff': presentDays[1],
+            },
+            'latest_approved_schedule':
+                scheduleList.isEmpty ? null : scheduleList.first,
+          };
+        },
+      );
 
   @override
-  Future<List<Map<String, dynamic>>> getAttendanceDtr() async {
-    final employee = await _currentEmployee();
-    if (employee == null) {
-      throw ApiException('Employee profile not found.');
-    }
-
-    final numericEmployeeId = _toIntId(employee['id']);
-    if (numericEmployeeId == null) {
-      throw ApiException('Employee profile not found.');
-    }
-
-    final rows = await _client
-        .from('attendance_records')
-        .select(
-          'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status,schedule_status,schedule_notes',
-        )
-        .eq('employee_id', numericEmployeeId)
-        .order('record_date', ascending: false);
-
-    return _toMapList(rows);
-  }
+  Future<List<Map<String, dynamic>>> getAttendanceDtr() => _guard(
+        'Load attendance',
+        'Unable to load your attendance records. Please try again.',
+        () async {
+          final employeeId = await _requireEmployeeId();
+          final rows = await _client
+              .from('attendance_records')
+              .select(
+                'id,record_date,time_in,time_out,scheduled_time_in,scheduled_time_out,tardiness_minutes,undertime_minutes,overtime_minutes,status,schedule_status,schedule_notes',
+              )
+              .eq('employee_id', employeeId)
+              .order('record_date', ascending: false);
+          return _toMapList(rows);
+        },
+      );
 
   @override
-  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() async {
-    final employee = await _currentEmployee();
-    if (employee == null || employee['id'] == null) {
-      throw ApiException('Employee profile not found.');
-    }
+  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() =>
+      _guard(
+        'Load schedule submission',
+        'Unable to load your schedule. Please try again.',
+        () async {
+          final employeeId = await _requireEmployeeId();
+          final submissionRows = await _client
+              .from('employee_schedule_submissions')
+              .select(
+                'id,employee_id,term_label,semester_label,status,submitted_at,reviewed_at,review_notes,is_current',
+              )
+              .eq('employee_id', employeeId)
+              .order('submitted_at', ascending: false)
+              .limit(1);
 
-    final numericEmployeeId = _toIntId(employee['id']);
-    if (numericEmployeeId == null) {
-      throw ApiException('Employee profile not found.');
-    }
+          final submissionList = _toMapList(submissionRows);
+          if (submissionList.isEmpty) {
+            return null;
+          }
 
-    final submissionRows = await _client
-        .from('employee_schedule_submissions')
-        .select(
-          'id,employee_id,term_label,semester_label,status,submitted_at,reviewed_at,review_notes,is_current',
-        )
-        .eq('employee_id', numericEmployeeId)
-        .order('submitted_at', ascending: false)
-        .limit(1);
+          final submission = submissionList.first;
+          final dayRows = await _client
+              .from('employee_schedule_days')
+              .select('day_name,day_index,has_work,time_in,time_out')
+              .eq('schedule_submission_id', submission['id'])
+              .order('day_index', ascending: true);
 
-    final submissionList = _toMapList(submissionRows);
-    if (submissionList.isEmpty) {
-      return null;
-    }
+          return {
+            'submission': submission,
+            'days': _toMapList(dayRows),
+          };
+        },
+      );
 
-    final submission = submissionList.first.cast<String, dynamic>();
-    final submissionId = submission['id'];
-
-    final dayRows = await _client
-        .from('employee_schedule_days')
-        .select('day_name,day_index,has_work,time_in,time_out')
-        .eq('schedule_submission_id', submissionId)
-        .order('day_index', ascending: true);
-
-    return {
-      'submission': submission,
-      'days': _toMapList(dayRows),
-    };
-  }
+  static final RegExp _timePattern = RegExp(r'^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$');
 
   @override
   Future<Map<String, dynamic>> submitEmployeeSchedule({
     required String termLabel,
     required List<Map<String, dynamic>> days,
   }) async {
-    final employee = await _currentEmployee();
-    final user = await _currentUserRow();
-    if (employee == null || employee['id'] == null) {
-      throw ApiException('Employee profile not found.');
-    }
-    if (user == null || user['id'] == null) {
-      throw ApiException('User profile not found.');
-    }
-
     final normalizedTerm = termLabel.trim();
-    if (normalizedTerm.isEmpty) {
-      throw ApiException('Term is required.');
+    if (normalizedTerm.isEmpty || normalizedTerm.length > 100) {
+      throw ApiException('Please choose a valid term.');
     }
 
     // Normalize term labels to canonical "Term" form so web and mobile match.
@@ -327,184 +325,141 @@ class ApiClient implements AppApiClient {
       'Term',
     );
 
-    if (days.isEmpty) {
+    if (days.isEmpty || days.length > 7) {
       throw ApiException('At least one schedule day is required.');
     }
 
-    final employeeId = _toIntId(employee['id']);
-    final submittedBy = _toIntId(user['id']);
-    if (employeeId == null || submittedBy == null) {
-      throw ApiException('Employee or user profile not found.');
-    }
-    final submittedAt = DateTime.now().toUtc().toIso8601String();
-
-    late int submissionId;
-    try {
-      final submissionRows = await _client
-          .from('employee_schedule_submissions')
-          .insert({
-            'employee_id': employeeId,
-            'submitted_by': submittedBy,
-            'semester_label': canonicalTerm,
-            'term_label': canonicalTerm,
-            'status': 'pending',
-            'submitted_at': submittedAt,
-            'is_current': false,
-          })
-          .select('id');
-
-      final submissionList = _toMapList(submissionRows);
-      if (submissionList.isEmpty || submissionList.first['id'] == null) {
-        throw ApiException(
-          'Schedule submission failed: unable to create header row.',
-        );
-      }
-
-      submissionId = submissionList.first['id'] as int;
-    } on PostgrestException catch (error) {
-      throw ApiException(
-        'Failed to create schedule submission header (RLS/permission issue?): ${error.message}',
-      );
-    } catch (error) {
-      throw ApiException('Failed to create schedule submission header: $error');
-    }
-
-    final dayRows = days.map((day) {
+    final dayRows = <Map<String, dynamic>>[];
+    for (final day in days) {
       final hasWork = day['has_work'] == true;
-      return <String, dynamic>{
-        'schedule_submission_id': submissionId,
-        'day_name': (day['day_name'] ?? '').toString(),
-        'day_index': day['day_index'],
+      final dayIndex = day['day_index'];
+      final dayName = (day['day_name'] ?? '').toString().trim();
+      if (dayIndex is! int || dayIndex < 0 || dayIndex > 6 || dayName.isEmpty) {
+        throw ApiException('The schedule contains an invalid day.');
+      }
+      final timeIn = day['time_in']?.toString();
+      final timeOut = day['time_out']?.toString();
+      if (hasWork) {
+        if (timeIn == null ||
+            timeOut == null ||
+            !_timePattern.hasMatch(timeIn) ||
+            !_timePattern.hasMatch(timeOut)) {
+          throw ApiException('Set a valid Time In and Time Out for $dayName.');
+        }
+      }
+      dayRows.add({
+        'day_name': dayName,
+        'day_index': dayIndex,
         'has_work': hasWork,
-        'time_in': hasWork ? day['time_in'] : null,
-        'time_out': hasWork ? day['time_out'] : null,
-      };
-    }).toList();
-
-    try {
-      await _client.from('employee_schedule_days').insert(dayRows);
-    } on PostgrestException catch (error) {
-      throw ApiException(
-        'Failed to save schedule days (RLS/permission issue?): ${error.message}',
-      );
-    } catch (error) {
-      throw ApiException('Failed to save schedule days: $error');
+        'time_in': hasWork ? timeIn : null,
+        'time_out': hasWork ? timeOut : null,
+      });
     }
 
-    return {
-      'message': 'Schedule submitted successfully.',
-      'submission_id': submissionId,
-      'term_label': normalizedTerm,
-      'day_count': dayRows.length,
-    };
+    return _guard(
+      'Submit schedule',
+      'Unable to submit your schedule. Please try again.',
+      () async {
+        final user = await _currentUserRow();
+        final employeeId = await _requireEmployeeId();
+        final submittedBy = _toIntId(user?['id']);
+        if (submittedBy == null) {
+          throw ApiException('User profile not found.');
+        }
+
+        final submissionRows = await _client
+            .from('employee_schedule_submissions')
+            .insert({
+              'employee_id': employeeId,
+              'submitted_by': submittedBy,
+              'semester_label': canonicalTerm,
+              'term_label': canonicalTerm,
+              'status': 'pending',
+              'submitted_at': DateTime.now().toUtc().toIso8601String(),
+              'is_current': false,
+            })
+            .select('id');
+
+        final submissionId = _toIntId(_toMapList(submissionRows).firstOrNull?['id']);
+        if (submissionId == null) {
+          throw ApiException('Unable to submit your schedule. Please try again.');
+        }
+
+        await _client.from('employee_schedule_days').insert([
+          for (final row in dayRows)
+            {'schedule_submission_id': submissionId, ...row},
+        ]);
+
+        return {
+          'message': 'Schedule submitted successfully.',
+          'submission_id': submissionId,
+          'term_label': normalizedTerm,
+          'day_count': dayRows.length,
+        };
+      },
+    );
   }
 
   @override
-  Future<Map<String, dynamic>> getLeaveMonitoring() async {
-    final employee = await _currentEmployee();
-    if (employee == null) {
-      throw ApiException('Employee profile not found.');
-    }
+  Future<Map<String, dynamic>> getLeaveMonitoring() => _guard(
+        'Load leave monitoring',
+        'Unable to load your leave records. Please try again.',
+        () async {
+          final employee = await _currentEmployee();
+          final employeeId = _toIntId(employee?['id']);
+          if (employeeId == null) {
+            throw ApiException('Employee profile not found.');
+          }
 
-    final employeeId = _toIntId(employee['id']);
-    if (employeeId == null) {
-      throw ApiException('Employee profile not found.');
-    }
-    final balances = await _client
-        .from('leave_balances')
-        .select(
-          'id,employee_id,leave_type,remaining_days,created_at,updated_at',
-        )
-        .eq('employee_id', employeeId);
-    final sortedBalances = _toMapList(balances)
-      ..sort((left, right) {
-        final leftUpdated = DateTime.tryParse(
-              (left['updated_at'] ?? left['created_at'] ?? '').toString(),
-            ) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final rightUpdated = DateTime.tryParse(
-              (right['updated_at'] ?? right['created_at'] ?? '').toString(),
-            ) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
+          final balances = await _client
+              .from('leave_balances')
+              .select(
+                'id,employee_id,leave_type,remaining_days,created_at,updated_at',
+              )
+              .eq('employee_id', employeeId);
+          final sortedBalances = _toMapList(balances)
+            ..sort((left, right) {
+              final leftUpdated = DateTime.tryParse(
+                    (left['updated_at'] ?? left['created_at'] ?? '')
+                        .toString(),
+                  ) ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              final rightUpdated = DateTime.tryParse(
+                    (right['updated_at'] ?? right['created_at'] ?? '')
+                        .toString(),
+                  ) ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
 
-        return rightUpdated.compareTo(leftUpdated);
-      });
+              return rightUpdated.compareTo(leftUpdated);
+            });
 
-    final requests = await _client
-        .from('leave_requests')
-        .select(
-          'id,employee_id,leave_type,start_date,end_date,days_deducted,status,cutoff_date,reason,created_at,updated_at',
-        )
-        .eq('employee_id', employeeId)
-        // Web: `latest('start_date')` (Postgres DESC puts NULLs first).
-        .order('start_date', ascending: false, nullsFirst: true);
+          final requests = await _client
+              .from('leave_requests')
+              .select(
+                'id,employee_id,leave_type,start_date,end_date,days_deducted,status,cutoff_date,reason,created_at,updated_at',
+              )
+              .eq('employee_id', employeeId)
+              // Web: `latest('start_date')` (Postgres DESC puts NULLs first).
+              .order('start_date', ascending: false, nullsFirst: true);
 
-    return {
-      'balances': sortedBalances,
-      'requests': _toMapList(requests),
-      // Needed for the web's current-employment-year usage window.
-      'hire_date': employee['hire_date'],
-    };
-  }
-
-  Future<Map<String, dynamic>> getSupabaseHealth() async {
-    try {
-      final rows = await _client.from('users').select('id').limit(1);
-      return {
-        'connected': true,
-        'message': 'Supabase direct read is working.',
-        'table': 'users',
-        'row_count': rows.length,
-      };
-    } catch (error) {
-      throw ApiException(error.toString());
-    }
-  }
-
-  Future<Map<String, dynamic>> getSupabaseSummary() async {
-    const tables = [
-      'users',
-      'employees',
-      'employee_credentials',
-      'announcements',
-    ];
-    final counts = <String, int>{};
-    final errors = <String, String>{};
-
-    for (final table in tables) {
-      try {
-        final rows = await _client.from(table).select('id');
-        counts[table] = rows.length;
-      } catch (error) {
-        errors[table] = error.toString();
-      }
-    }
-
-    if (counts.isEmpty) {
-      throw ApiException('Unable to load Supabase summary.');
-    }
-
-    return {
-      'connected': true,
-      'message': 'Supabase summary loaded.',
-      'counts': counts,
-      if (errors.isNotEmpty) 'errors': errors,
-    };
-  }
+          return {
+            'balances': sortedBalances,
+            'requests': _toMapList(requests),
+            // Needed for the web's current-employment-year usage window.
+            'hire_date': employee?['hire_date'],
+          };
+        },
+      );
 
   @override
   Future<List<AcademicCalendarEntry>> getAcademicCalendarEntries() async {
-    final baseUrl = AppConfig.laravelBaseUrl.trim();
-    if (baseUrl.isEmpty) {
-      throw ApiException(
-        'Academic Calendar API is not configured. Set LARAVEL_BASE_URL.',
-      );
+    final baseUrl = AppConfig.secureBaseUrl;
+    if (baseUrl == null) {
+      appLog('Academic Calendar API URL is missing or not HTTPS');
+      throw ApiException('The Academic Calendar is not available right now.');
     }
 
-    final normalizedBaseUrl = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
-    final uri = Uri.parse('$normalizedBaseUrl/api/academic-calendar');
+    final uri = Uri.parse('$baseUrl/api/academic-calendar');
 
     late http.Response response;
     try {
@@ -512,22 +467,28 @@ class ApiClient implements AppApiClient {
           .get(uri, headers: const {'Accept': 'application/json'})
           .timeout(const Duration(seconds: 15));
     } catch (error) {
+      appLog('Academic Calendar request failed', error.runtimeType);
       throw ApiException(
-        'Cannot reach the Laravel API at $uri. '
-        '${_laravelReachabilityHint(uri)}',
+        'Unable to reach the Academic Calendar. Please try again later.',
       );
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      appLog('Academic Calendar HTTP ${response.statusCode}');
       throw ApiException(
-        'Academic Calendar request failed: ${response.statusCode}',
+        'Unable to load the Academic Calendar. Please try again later.',
         statusCode: response.statusCode,
       );
     }
 
-    final decoded = jsonDecode(response.body);
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      throw ApiException('The Academic Calendar returned invalid data.');
+    }
     if (decoded is! List) {
-      throw ApiException('Academic Calendar API returned an invalid payload.');
+      throw ApiException('The Academic Calendar returned invalid data.');
     }
 
     final entries = decoded
@@ -541,1018 +502,446 @@ class ApiClient implements AppApiClient {
     return entries;
   }
 
-  String _laravelReachabilityHint(Uri uri) {
-    final isLoopback = uri.host == '127.0.0.1' || uri.host == 'localhost';
-    if (isLoopback && !kIsWeb && Platform.isAndroid) {
-      return 'On Android, $uri points at the device itself. Run Laravel with '
-          '"php artisan serve --host=0.0.0.0" and set LARAVEL_BASE_URL to '
-          'http://10.0.2.2:8000 (emulator) or your PC\'s LAN IP (device).';
-    }
-    return 'Make sure the Laravel server is running and LARAVEL_BASE_URL '
-        'is reachable from this device.';
-  }
-
   @override
-  Future<List<Map<String, dynamic>>> getNotifications() async {
-    final user = await _currentUserRow();
-    if (user == null || user['id'] == null) {
-      throw ApiException('User profile not found.');
-    }
-
-    final employee = await _currentEmployee();
-
-    final notificationUserIds = <int>{};
-
-    final currentUserId = _toIntId(user['id']);
-    if (currentUserId != null) {
-      notificationUserIds.add(currentUserId);
-    }
-
-    final employeeUserId = _toIntId(employee?['user_id']);
-    if (employeeUserId != null) {
-      notificationUserIds.add(employeeUserId);
-    }
-
-    if (notificationUserIds.isEmpty) {
-      debugPrint('🔔 Notifications: no user IDs resolved.');
-      return const [];
-    }
-
-    debugPrint(
-      '🔔 Notifications: loading for user IDs ${notificationUserIds.toList()}',
-    );
-
-    try {
-      // ============================================================
-      // STEP 1: Load notification rows first.
-      // ============================================================
-      final notificationRows = await _client
-          .from('announcement_notifications')
-          .select(
-            'id,user_id,announcement_id,is_read,read_at,created_at,updated_at,redirect_url',
-          )
-          .inFilter('user_id', notificationUserIds.toList())
-          .order('created_at', ascending: false);
-
-      final notifications = _toMapList(notificationRows);
-
-      debugPrint(
-        '📥 Notification rows loaded: ${notifications.length}',
-      );
-
-      debugPrint('🔔 ===== NOTIFICATION ROWS =====');
-      for (final notification in notifications) {
-        debugPrint(
-          '🔔 ID: ${notification['id']} | '
-          'USER: ${notification['user_id']} | '
-          'ANNOUNCEMENT: ${notification['announcement_id']} | '
-          'READ: ${notification['is_read']} | '
-          'CREATED: ${notification['created_at']}',
-        );
-      }
-      debugPrint('🔔 =============================');
-
-      if (notifications.isEmpty) {
-        debugPrint('📭 No notification rows found.');
-        return const [];
-      }
-
-      // ============================================================
-      // STEP 2: Collect announcement IDs.
-      // ============================================================
-      final announcementIds = <int>{};
-
-      for (final notification in notifications) {
-        final announcementId = _toIntId(notification['announcement_id']);
-        if (announcementId != null) {
-          announcementIds.add(announcementId);
-        }
-      }
-
-      debugPrint(
-        '📢 Announcement IDs found: ${announcementIds.toList()}',
-      );
-
-      if (announcementIds.isEmpty) {
-        return notifications;
-      }
-
-      // ============================================================
-      // STEP 3: Load announcements separately.
-      // ============================================================
-      final announcementRows = await _client
-          .from('announcements')
-          .select(
-            'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
-          )
-          .inFilter('id', announcementIds.toList());
-
-      final announcements = _toMapList(announcementRows);
-
-      debugPrint(
-        '📢 Announcements loaded: ${announcements.length}',
-      );
-
-      debugPrint('📢 ===== ANNOUNCEMENT ROWS =====');
-      for (final announcement in announcements) {
-        debugPrint(
-          '📢 ID: ${announcement['id']} | '
-          'TITLE: ${announcement['title']} | '
-          'PUBLISHED: ${announcement['is_published']} | '
-          'DELETED: ${announcement['deleted_at']} | '
-          'EXPIRES: ${announcement['expires_at']}',
-        );
-      }
-      debugPrint('📢 =============================');
-
-      final announcementMap = <int, Map<String, dynamic>>{};
-
-      for (final announcement in announcements) {
-        final id = _toIntId(announcement['id']);
-        if (id != null) {
-          announcementMap[id] = announcement;
-        }
-      }
-
-      // ============================================================
-      // STEP 4: Attach announcements to notifications.
-      // ============================================================
-      final results = <Map<String, dynamic>>[];
-
-      for (final notification in notifications) {
-        final notificationId = _toIntId(notification['id']);
-        final announcementId = _toIntId(notification['announcement_id']);
-
-        debugPrint(
-          '🔍 Processing notification $notificationId '
-          '→ announcement $announcementId',
-        );
-
-        if (announcementId == null) {
-          debugPrint(
-            '⚠️ Notification $notificationId has no announcement_id.',
-          );
-          final item = Map<String, dynamic>.from(notification);
-          item['announcement'] = <String, dynamic>{
-            'title': 'Announcement',
-            'content': '',
-            'priority': 'medium',
-          };
-          results.add(item);
-          continue;
-        }
-
-        Map<String, dynamic>? announcement = announcementMap[announcementId];
-
-        // Fallback: if the bulk query did not return the announcement,
-        // try fetching that exact announcement by ID.
-        if (announcement == null) {
-          debugPrint(
-            '⚠️ Announcement $announcementId was not returned by bulk query. '
-            'Trying direct lookup...',
-          );
-
-          try {
-            final fallbackRows = await _client
-                .from('announcements')
-                .select(
-                  'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
-                )
-                .eq('id', announcementId)
-                .limit(1);
-
-            final fallbackList = _toMapList(fallbackRows);
-
-            if (fallbackList.isNotEmpty) {
-              announcement = fallbackList.first;
-              debugPrint(
-                '✅ Direct lookup found announcement $announcementId: '
-                '${announcement['title']}',
-              );
-            }
-          } catch (error) {
-            debugPrint(
-              '❌ Direct announcement lookup failed for $announcementId: $error',
-            );
+  Future<List<Map<String, dynamic>>> getNotifications() => _guard(
+        'Load notifications',
+        'Unable to load notifications. Please try again.',
+        () async {
+          final user = await _currentUserRow();
+          final userId = _toIntId(user?['id']);
+          if (userId == null) {
+            throw ApiException('User profile not found.');
           }
-        }
 
-        if (announcement == null) {
-          debugPrint(
-            '❌ Announcement $announcementId does not exist or is not readable. '
-            'Using fallback announcement payload.',
+          // STEP 1: Load the employee's notification rows.
+          final notifications = _toMapList(
+            await _client
+                .from('announcement_notifications')
+                .select(
+                  'id,user_id,announcement_id,is_read,read_at,created_at,updated_at,redirect_url',
+                )
+                .eq('user_id', userId)
+                .order('created_at', ascending: false),
           );
-        }
+          if (notifications.isEmpty) {
+            return const <Map<String, dynamic>>[];
+          }
 
-        // announcement_notifications is the source of truth that the user
-        // received a notification, even if announcement metadata is unreadable.
-        final item = Map<String, dynamic>.from(notification);
-        item['announcement'] = announcement != null
-            ? Map<String, dynamic>.from(announcement)
-            : <String, dynamic>{
-                'title': 'Announcement',
-                'content': '',
-                'priority': 'medium',
-              };
-        results.add(item);
+          // STEP 2: Load the referenced announcements in one query.
+          final announcementIds = <int>{
+            for (final n in notifications)
+              ?_toIntId(n['announcement_id']),
+          };
+          final announcementMap = <int, Map<String, dynamic>>{};
+          if (announcementIds.isNotEmpty) {
+            final rows = _toMapList(
+              await _client
+                  .from('announcements')
+                  .select(
+                    'id,title,content,priority,target_office,published_at,created_at,is_published,deleted_at,expires_at',
+                  )
+                  .inFilter('id', announcementIds.toList()),
+            );
+            for (final row in rows) {
+              final id = _toIntId(row['id']);
+              if (id != null) announcementMap[id] = row;
+            }
+          }
 
-        debugPrint(
-          '✅ ADDED notification $notificationId '
-          '→ announcement $announcementId '
-          '→ "${item['announcement']?['title']}"',
-        );
-      }
-
-      debugPrint(
-        '🎉 Notifications returned to Flutter: ${results.length}',
+          // STEP 3: Attach announcements. announcement_notifications is the
+          // source of truth that the user received a notification, even if
+          // the announcement metadata is unreadable.
+          return [
+            for (final notification in notifications)
+              {
+                ...notification,
+                'announcement': announcementMap[
+                        _toIntId(notification['announcement_id'])] ??
+                    <String, dynamic>{
+                      'title': 'Announcement',
+                      'content': '',
+                      'priority': 'medium',
+                    },
+              },
+          ];
+        },
       );
 
-      debugPrint('📋 ===== FINAL NOTIFICATIONS =====');
-      for (final item in results) {
-        debugPrint(
-          '📋 Notification ${item['id']} → '
-          'User ${item['user_id']} → '
-          'Announcement ${item['announcement_id']} → '
-          '${item['announcement']?['title']} → '
-          'Read: ${item['is_read']}',
-        );
-      }
-      debugPrint('📋 ================================');
-
-      return results;
-    } on PostgrestException catch (error) {
-      debugPrint(
-        '❌ Notification query failed: ${error.message} (${error.code})',
-      );
-      throw ApiException(
-        'Failed to load notifications: ${error.message}',
-      );
-    } catch (error) {
-      debugPrint(
-        '❌ Failed to load notifications: $error',
-      );
-      throw ApiException(
-        'Failed to load notifications: $error',
-      );
-    }
-  }
-
   @override
-  Future<void> markAllNotificationsRead() async {
-    final user = await _currentUserRow();
-    if (user == null || user['id'] == null) {
-      throw ApiException('User profile not found.');
-    }
-
-    try {
-      int? numericUserId = _toIntId(user['id']);
-      if (numericUserId == null) {
-        final employee = await _currentEmployee();
-        numericUserId = _toIntId(employee?['user_id']);
-      }
-
-      if (numericUserId == null) {
-        return; // nothing to mark
-      }
-
-      await _client
-          .from('announcement_notifications')
-          .update({
-            'is_read': true,
-            'read_at': DateTime.now().toIso8601String(),
-          })
-          .eq('user_id', numericUserId);
-    } catch (error) {
-      throw ApiException('Failed to mark notifications read: $error');
-    }
-  }
-
-  @override
-  Future<void> markNotificationRead(String notificationId) async {
-    final user = await _currentUserRow();
-    if (user == null || user['id'] == null) {
-      throw ApiException('User profile not found.');
-    }
-
-    try {
-      int? numericUserId = _toIntId(user['id']);
-      if (numericUserId == null) {
-        final employee = await _currentEmployee();
-        numericUserId = _toIntId(employee?['user_id']);
-      }
-
-      if (numericUserId == null) {
-        return; // nothing to mark
-      }
-
-      await _client
-          .from('announcement_notifications')
-          .update({
-            'is_read': true,
-            'read_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', notificationId)
-          .eq('user_id', numericUserId);
-    } catch (error) {
-      throw ApiException('Failed to mark notification read: $error');
-    }
-  }
-
-  @override
-  Future<void> clearAllNotifications() async {
-    final user = await _currentUserRow();
-    if (user == null || user['id'] == null) {
-      throw ApiException('User profile not found.');
-    }
-
-    try {
-      int? numericUserId = _toIntId(user['id']);
-      if (numericUserId == null) {
-        final employee = await _currentEmployee();
-        numericUserId = _toIntId(employee?['user_id']);
-      }
-
-      if (numericUserId == null) {
-        return; // nothing to clear
-      }
-
-      await _client
-          .from('announcement_notifications')
-          .delete()
-          .eq('user_id', numericUserId);
-    } catch (error) {
-      throw ApiException('Failed to clear notifications: $error');
-    }
-  }
-
-  @override
-  Future<Map<String, dynamic>> getAccount() async {
-    final user = await _currentUserRow();
-    final employee = await _currentEmployee();
-
-    return {'user': user, 'employee': employee};
-  }
-
-  @override
-  Future<Map<String, dynamic>> updateAccount(
-    Map<String, dynamic> payload,
-  ) async {
-    final user = await _currentUserRow();
-    if (user == null) {
-      throw ApiException('User profile not found.');
-    }
-
-    final userId = user['id'];
-    if (userId != null) {
-      final update = <String, dynamic>{};
-      if (payload.containsKey('name')) {
-        update['name'] = payload['name'];
-      }
-      if (payload.containsKey('email')) {
-        update['email'] = payload['email'];
-      }
-      if (update.isNotEmpty) {
-        final numericUserId = _toIntId(userId);
-        if (numericUserId != null) {
-          await _client.from('users').update(update).eq('id', numericUserId);
-        }
-      }
-    }
-
-    final employee = await _currentEmployee();
-    if (employee != null && employee['id'] != null) {
-      final employeeUpdate = <String, dynamic>{};
-      if (payload.containsKey('phone')) {
-        employeeUpdate['phone'] = payload['phone'];
-      }
-      if (payload.containsKey('address')) {
-        employeeUpdate['address'] = payload['address'];
-      }
-      if (payload.containsKey('employment_type')) {
-        employeeUpdate['employment_type'] = payload['employment_type'];
-      }
-      if (employeeUpdate.isNotEmpty) {
-        final numericEmployeeId = _toIntId(employee['id']);
-        if (numericEmployeeId != null) {
+  Future<void> markAllNotificationsRead() => _guard(
+        'Mark notifications read',
+        'Unable to update notifications. Please try again.',
+        () async {
+          final userId = _toIntId((await _currentUserRow())?['id']);
+          if (userId == null) return;
           await _client
-              .from('employees')
-              .update(employeeUpdate)
-              .eq('id', numericEmployeeId);
-        }
-      }
-    }
-
-    final refreshed = await getAccount();
-    return {'message': 'Account updated successfully.', ...refreshed};
-  }
+              .from('announcement_notifications')
+              .update({
+                'is_read': true,
+                'read_at': DateTime.now().toIso8601String(),
+              })
+              .eq('user_id', userId);
+        },
+      );
 
   @override
-  Future<Map<String, String>> uploadProfilePhoto({
-    required String filePath,
-  }) async {
-    final file = File(filePath);
-    if (!file.existsSync()) {
-      throw ApiException('Selected photo file was not found.');
-    }
-
-    final bytes = await file.readAsBytes();
-    final authUid = (_client.auth.currentUser?.id ?? '').trim();
-
-    if (authUid.isEmpty) {
-      throw ApiException(
-        'Profile photo upload requires an authenticated Supabase session. Please sign in again.',
+  Future<void> markNotificationRead(String notificationId) => _guard(
+        'Mark notification read',
+        'Unable to update this notification. Please try again.',
+        () async {
+          final userId = _toIntId((await _currentUserRow())?['id']);
+          final id = _toIntId(notificationId);
+          if (userId == null || id == null) return;
+          await _client
+              .from('announcement_notifications')
+              .update({
+                'is_read': true,
+                'read_at': DateTime.now().toIso8601String(),
+              })
+              .eq('id', id)
+              .eq('user_id', userId);
+        },
       );
-    }
 
-    const contentType = 'image/jpeg';
-    StorageException? lastMissingBucketError;
-    StorageException? lastPolicyDeniedError;
-    Exception? lastOtherError;
-
-    final filePathOnBucket = '$authUid/avatar.jpg';
-    try {
-      await _client.storage
-          .from(_profilePhotoBucket)
-          .uploadBinary(
-            filePathOnBucket,
-            bytes,
-            fileOptions: const FileOptions(
-              contentType: contentType,
-              upsert: true,
-            ),
-          );
-
-      final savedPath = '$_profilePhotoPathPrefix$filePathOnBucket';
-      await _persistProfilePhotoPath(savedPath);
-
-      final publicUrl = _client.storage
-          .from(_profilePhotoBucket)
-          .getPublicUrl(filePathOnBucket);
-
-      return {'path': savedPath, 'url': publicUrl};
-    } on StorageException catch (error) {
-      final msg = error.message.toLowerCase();
-      final isMissingBucket =
-          msg.contains('bucket not found') ||
-          msg.contains('bucket does not exist') ||
-          (msg.contains('does not exist') && msg.contains('bucket'));
-      if (isMissingBucket) {
-        lastMissingBucketError = error;
-      } else if (msg.contains('row-level security') ||
-          msg.contains('not authorized') ||
-          msg.contains('permission denied') ||
-          msg.contains('violates')) {
-        lastPolicyDeniedError = error;
-      } else {
-        lastOtherError = error;
-      }
-    } catch (error) {
-      lastOtherError = Exception(error.toString());
-    }
-
-    if (lastPolicyDeniedError != null) {
-      throw ApiException(
-        'Profile photo upload failed: ${lastPolicyDeniedError.message}. The bucket exists but RLS denied the upload. Check INSERT policy for storage.objects and ensure the upload path/prefix is allowed.',
+  @override
+  Future<void> clearAllNotifications() => _guard(
+        'Clear notifications',
+        'Unable to clear notifications. Please try again.',
+        () async {
+          final userId = _toIntId((await _currentUserRow())?['id']);
+          if (userId == null) return;
+          await _client
+              .from('announcement_notifications')
+              .delete()
+              .eq('user_id', userId);
+        },
       );
-    }
 
-    if (lastMissingBucketError != null) {
-      final bucketNames = _profilePhotoBuckets.join(', ');
-      throw ApiException(
-        'Profile photo upload failed: ${lastMissingBucketError.message}. Check storage bucket names: $bucketNames.',
+  @override
+  Future<Map<String, dynamic>> getAccount() => _guard(
+        'Load account',
+        'Unable to load your account. Please try again.',
+        () async {
+          final user = await _currentUserRow();
+          final employee = await _currentEmployee();
+          return {'user': user, 'employee': employee};
+        },
       );
-    }
 
-    if (lastOtherError != null) {
-      throw ApiException('Profile photo upload failed: $lastOtherError');
-    }
-
-    throw ApiException(
-      'Profile photo upload failed: unable to upload the selected file.',
-    );
-  }
-
+  /// Short-lived signed URL for the employee's profile photo, if any.
   @override
   Future<String?> getProfilePhotoUrl() async {
-    final user = await _currentUserRow();
-    final employee = await _currentEmployee();
-
-    Map<String, dynamic> userRow = user ?? <String, dynamic>{};
-    Map<String, dynamic> employeeRow = employee ?? <String, dynamic>{};
-
-    if (user?['id'] != null) {
-      try {
-        final rows = await _client
-            .from('users')
-            .select('*')
-            .eq('id', user!['id'])
-            .limit(1);
-        final list = _toMapList(rows);
-        if (list.isNotEmpty) {
-          userRow = list.first;
-        }
-      } catch (_) {
-        // Best effort only.
+    try {
+      final employee = await _currentEmployee();
+      final stored =
+          (employee?['profilephoto_path'] ?? '').toString().trim();
+      if (stored.isNotEmpty) {
+        final url = await _signStoredPhotoPath(stored);
+        if (url != null) return url;
       }
+
+      // Location used by earlier app versions: <auth uid>/avatar.jpg.
+      final authUid = (_client.auth.currentUser?.id ?? '').trim();
+      if (authUid.isEmpty) return null;
+      return await _client.storage
+          .from(_filesBucket)
+          .createSignedUrl('$authUid/avatar.jpg', _photoUrlSeconds);
+    } catch (error) {
+      appLog('Profile photo lookup failed', error.runtimeType);
+      return null;
+    }
+  }
+
+  Future<String?> _signStoredPhotoPath(String storedPath) async {
+    // Legacy rows may store a full URL; only HTTPS URLs are accepted.
+    final uri = Uri.tryParse(storedPath);
+    if (uri != null && uri.hasScheme) {
+      return AppConfig.isHttpsUrl(storedPath) ? storedPath : null;
     }
 
-    if (employee?['id'] != null) {
-      try {
-        final rows = await _client
-            .from('employees')
-            .select('*')
-            .eq('id', employee!['id'])
-            .limit(1);
-        final list = _toMapList(rows);
-        if (list.isNotEmpty) {
-          employeeRow = list.first;
-        }
-      } catch (_) {
-        // Best effort only.
-      }
+    var objectPath = storedPath;
+    if (objectPath.startsWith('$_filesBucket/')) {
+      objectPath = objectPath.substring(_filesBucket.length + 1);
     }
-
-    final storedPath = _extractProfilePhotoPath(userRow, employeeRow);
-    if (storedPath != null) {
-      final url = await _tryCreateSignedUrlFromStoredPath(storedPath);
-      if (url != null) {
-        return url;
-      }
+    try {
+      return await _client.storage
+          .from(_filesBucket)
+          .createSignedUrl(objectPath, _photoUrlSeconds);
+    } catch (error) {
+      appLog('Profile photo signing failed', error.runtimeType);
+      return null;
     }
-
-    final authUid = (_client.auth.currentUser?.id ?? '').trim();
-    final userId = (user?['id'] ?? '').toString().trim();
-    final employeeId = (employee?['id'] ?? '').toString().trim();
-    final prefixes = <String>{
-      if (employeeId.isNotEmpty) 'employee-$employeeId',
-      if (userId.isNotEmpty) 'user-$userId',
-      if (authUid.isNotEmpty) authUid,
-      if (userId.isNotEmpty) userId,
-    };
-
-    const extensions = ['jpg', 'jpeg', 'png'];
-    const fileNames = ['avatar', 'profile'];
-
-    for (final bucket in _profilePhotoBuckets) {
-      for (final prefix in prefixes) {
-        for (final fileName in fileNames) {
-          for (final ext in extensions) {
-            final path = '$prefix/$fileName.$ext';
-            try {
-              return await _client.storage
-                  .from(bucket)
-                  .createSignedUrl(path, 60 * 60 * 24 * 30);
-            } catch (_) {
-              // Try next candidate.
-            }
-          }
-        }
-      }
-    }
-
-    return null;
   }
 
   /// Mirrors the web `PrivacyNoticeController::acknowledge`:
   /// `updateOrCreate` on (user_id, privacy_notice_version) in
   /// `privacy_notice_acknowledgments`, setting `acknowledged_at` to now.
   @override
-  Future<void> acknowledgePrivacyNotice({required String version}) async {
-    final user = await _currentUserRow();
-    final userId = _toIntId(user?['id']);
-    if (userId == null) {
-      throw ApiException('User profile not found.');
-    }
+  Future<void> acknowledgePrivacyNotice({required String version}) => _guard(
+        'Record Privacy Notice acknowledgment',
+        'Unable to save your acknowledgment. Please try again.',
+        () async {
+          final userId = _toIntId((await _currentUserRow())?['id']);
+          if (userId == null) {
+            throw ApiException('User profile not found.');
+          }
 
-    // Laravel stores these `timestamp without time zone` columns in
-    // Asia/Manila wall-clock time (UTC+8).
-    final manila = DateTime.now().toUtc().add(const Duration(hours: 8));
-    String two(int value) => value.toString().padLeft(2, '0');
-    final now =
-        '${manila.year}-${two(manila.month)}-${two(manila.day)} '
-        '${two(manila.hour)}:${two(manila.minute)}:${two(manila.second)}';
+          // Laravel stores these `timestamp without time zone` columns in
+          // Asia/Manila wall-clock time (UTC+8).
+          final manila = DateTime.now().toUtc().add(const Duration(hours: 8));
+          String two(int value) => value.toString().padLeft(2, '0');
+          final now =
+              '${manila.year}-${two(manila.month)}-${two(manila.day)} '
+              '${two(manila.hour)}:${two(manila.minute)}:${two(manila.second)}';
 
-    try {
-      final existing = _toMapList(
-        await _client
-            .from('privacy_notice_acknowledgments')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('privacy_notice_version', version)
-            .limit(1),
+          final existing = _toMapList(
+            await _client
+                .from('privacy_notice_acknowledgments')
+                .select('id')
+                .eq('user_id', userId)
+                .eq('privacy_notice_version', version)
+                .limit(1),
+          );
+
+          if (existing.isNotEmpty) {
+            await _client
+                .from('privacy_notice_acknowledgments')
+                .update({'acknowledged_at': now, 'updated_at': now})
+                .eq('id', existing.first['id']);
+          } else {
+            await _client.from('privacy_notice_acknowledgments').insert({
+              'user_id': userId,
+              'privacy_notice_version': version,
+              'acknowledged_at': now,
+              'created_at': now,
+              'updated_at': now,
+            });
+          }
+        },
       );
-
-      if (existing.isNotEmpty) {
-        await _client
-            .from('privacy_notice_acknowledgments')
-            .update({'acknowledged_at': now, 'updated_at': now})
-            .eq('id', existing.first['id']);
-      } else {
-        await _client.from('privacy_notice_acknowledgments').insert({
-          'user_id': userId,
-          'privacy_notice_version': version,
-          'acknowledged_at': now,
-          'created_at': now,
-          'updated_at': now,
-        });
-      }
-    } on PostgrestException catch (error) {
-      throw ApiException(
-        'Failed to record Privacy Notice acknowledgment: ${error.message}',
-      );
-    }
-  }
 
   /// Read-only mirror of the web `Employee\PortalController::profile` degree
   /// list: the employee's `employee_credentials` rows of type `degrees`.
   /// Submitting or deleting degrees is only available on the web portal.
   @override
-  Future<List<Map<String, dynamic>>> getEmployeeDegrees() async {
-    final employee = await _currentEmployee();
-    final employeeId = _toIntId(employee?['id']);
-    if (employeeId == null) {
-      throw ApiException('Employee profile not found.');
-    }
+  Future<List<Map<String, dynamic>>> getEmployeeDegrees() => _guard(
+        'Load degrees',
+        'Unable to load your degrees. Please try again.',
+        () async {
+          final employeeId = await _requireEmployeeId();
+          final rows = await _client
+              .from('employee_credentials')
+              .select(
+                'id,employee_id,credential_type,degree_level,status,file_path,'
+                'original_filename,review_notes,created_at',
+              )
+              .eq('employee_id', employeeId)
+              .eq('credential_type', 'degrees')
+              .order('id', ascending: true);
+          return _toMapList(rows);
+        },
+      );
 
-    final rows = await _client
-        .from('employee_credentials')
-        .select(
-          'id,employee_id,credential_type,degree_level,status,file_path,'
-          'original_filename,review_notes,created_at',
-        )
-        .eq('employee_id', employeeId)
-        .eq('credential_type', 'degrees')
-        .order('id', ascending: true);
-
-    return _toMapList(rows);
-  }
-
+  /// Signs a stored object key in the private "credentials" bucket for
+  /// [_documentUrlSeconds]. Web stores only the object key, e.g.
+  /// `employee-12/1755712345_a3f19c2e.pdf`.
   @override
   Future<String?> getCredentialFileUrl(String storedPath) async {
     final normalized = storedPath.trim();
     if (normalized.isEmpty) return null;
 
-    // Legacy rows may already store a full URL.
+    // Legacy rows may already store a full URL; never open plain HTTP.
     final uri = Uri.tryParse(normalized);
-    if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
-      return normalized;
+    if (uri != null && uri.hasScheme) {
+      if (AppConfig.isHttpsUrl(normalized)) return normalized;
+      throw ApiException('This file cannot be opened securely.');
     }
 
-    // Web stores only the Supabase object key in file_path (not a URL), e.g.
-    // employee-12/1755712345_a3f19c2e.pdf
-    // employee-12/wfh-monitoring/1755712401_b7c04d11.pdf
-    // Both Credentials and WFH files live in the private "credentials" bucket.
-    try {
-      return await _client.storage
-          .from('credentials')
-          .createSignedUrl(normalized, 300);
-    } catch (error) {
-      throw ApiException(
-        'Failed to create a signed URL for this file. '
-        'Object key: $normalized. Error: $error',
-      );
+    var objectKey = normalized;
+    if (objectKey.startsWith('$_filesBucket/')) {
+      objectKey = objectKey.substring(_filesBucket.length + 1);
     }
+
+    return _guard(
+      'Sign document URL',
+      'Unable to open this file right now. Please try again.',
+      () => _client.storage
+          .from(_filesBucket)
+          .createSignedUrl(objectKey, _documentUrlSeconds),
+    );
   }
 
+  /// Uploads a WFH file for the signed-in employee after validating size,
+  /// extension and file signature. Returns the stored object key, in the same
+  /// `employee-<id>/wfh-monitoring/<time>_<random>.<ext>` layout as the web.
   @override
   Future<String> uploadEmployeeCredentialFile({
-    required dynamic employeeId,
-    dynamic employeeAlternateId,
     required Uint8List fileBytes,
     required String originalFileName,
   }) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final safeName = originalFileName.trim().replaceAll(
-      RegExp(r'[^a-zA-Z0-9._-]'),
-      '_',
+    final validated = validateUpload(
+      originalName: originalFileName,
+      bytes: fileBytes,
     );
-    final user = await _currentUserRow();
-    final authUid = (_client.auth.currentUser?.id ?? '').trim();
-    final userId = (user?['id'] ?? '').toString().trim();
 
-    debugPrint('DEBUG uploadEmployeeCredentialFile:');
-    debugPrint('  currentUser: ${_client.auth.currentUser?.email}');
-    debugPrint('  authUid: "$authUid"');
-    debugPrint('  userId: "$userId"');
-    debugPrint('  employeeId: "$employeeId"');
-
-    final candidatePrefixes = <String>{
-      'employee-$employeeId',
-      'employee_$employeeId',
-      if (employeeAlternateId != null)
-        'employee-${employeeAlternateId.toString().trim()}',
-      if (employeeAlternateId != null)
-        'employee_${employeeAlternateId.toString().trim()}',
-      if (authUid.isNotEmpty) authUid,
-      if (userId.isNotEmpty) 'user-$userId',
-      if (userId.isNotEmpty) userId,
-    }.toList();
-    debugPrint('  candidatePrefixes: $candidatePrefixes');
-
-    final contentType = _contentTypeFromFileName(safeName);
-
-    StorageException? lastMissingBucketError;
-    StorageException? lastPolicyDeniedError;
-
-    for (final bucket in _credentialFilesBuckets) {
-      final bucketName = bucket.toLowerCase();
-      for (final prefix in candidatePrefixes) {
-        final filePath = '$prefix/${timestamp}_$safeName';
-        try {
-          await _client.storage
-              .from(bucketName)
-              .uploadBinary(
-                filePath,
-                fileBytes,
-                fileOptions: FileOptions(
-                  contentType: contentType,
-                  upsert: false,
-                ),
-              );
-          return '$bucketName/$filePath';
-        } on StorageException catch (error) {
-          final message = error.message.toLowerCase();
-          final isMissingBucket =
-              message.contains('bucket not found') ||
-              message.contains('not found') ||
-              message.contains('does not exist');
-          final isPolicyDenied =
-              message.contains('row-level security') ||
-              message.contains('violates') ||
-              message.contains('not authorized') ||
-              message.contains('permission denied');
-
-          if (isMissingBucket) {
-            lastMissingBucketError = error;
-            // No need to try other prefixes if bucket itself is missing.
-            break;
-          }
-
-          if (isPolicyDenied) {
-            lastPolicyDeniedError = error;
-            continue;
-          }
-
-          throw ApiException('File upload failed: ${error.message}');
-        } catch (error) {
-          throw ApiException('File upload failed: $error');
-        }
-      }
-    }
-
-    if (lastPolicyDeniedError != null) {
-      throw ApiException(
-        'File upload failed: ${lastPolicyDeniedError.message}. The bucket exists but RLS denied the upload. Check INSERT policy for storage.objects.',
-      );
-    }
-
-    if (lastMissingBucketError != null) {
-      throw ApiException(
-        'File upload failed: ${lastMissingBucketError.message}. Check storage bucket name for: ${_credentialFilesBuckets.join(', ')}.',
-      );
-    }
-
-    throw ApiException(
-      'File upload failed: unable to upload the selected file.',
+    return _guard(
+      'Upload WFH file',
+      'Unable to upload the file. Please try again.',
+      () async {
+        final employeeId = await _requireEmployeeId();
+        final objectKey =
+            'employee-$employeeId/wfh-monitoring/${validated.storedFileName}';
+        await _client.storage.from(_filesBucket).uploadBinary(
+              objectKey,
+              fileBytes,
+              fileOptions: FileOptions(
+                contentType: validated.contentType,
+                upsert: false,
+              ),
+            );
+        return objectKey;
+      },
     );
   }
 
   @override
   Future<Map<String, dynamic>> submitWfhMonitoring({
-    required dynamic employeeId,
-    required String wfhDate,
-    String? timeIn,
-    String? timeOut,
+    required DateTime wfhDate,
+    required String timeIn,
+    required String timeOut,
     required String filePath,
+    required String originalFilename,
   }) async {
-    // Get the current user to populate submitted_by
-    final user = await _currentUserRow();
-    if (user == null || user['id'] == null) {
-      throw ApiException('User not authenticated.');
+    if (!_timePattern.hasMatch(timeIn) || !_timePattern.hasMatch(timeOut)) {
+      throw ApiException('Please enter a valid time in and time out.');
+    }
+    if (timeOut.compareTo(timeIn) <= 0) {
+      throw ApiException('The time out must be later than the time in.');
     }
 
-    final now = DateTime.now().toIso8601String();
-    final payload = <String, dynamic>{
-      'employee_id': employeeId,
-      'submitted_by': user['id'],
-      'wfh_date': wfhDate,
-      'time_in': timeIn,
-      'time_out': timeOut,
-      'file_path': filePath,
-      'status': 'pending',
-      'submitted_at': now,
-      'created_at': now,
-      'updated_at': now,
-    };
+    final date =
+        '${wfhDate.year.toString().padLeft(4, '0')}-'
+        '${wfhDate.month.toString().padLeft(2, '0')}-'
+        '${wfhDate.day.toString().padLeft(2, '0')}';
 
-    try {
-      final rows = await _client
-          .from('wfh_monitoring_submissions')
-          .insert(payload)
-          .select('id')
-          .limit(1);
-      final list = _toMapList(rows);
-      final insertedId = list.isNotEmpty ? list.first['id'] : null;
-      return {'id': insertedId, 'message': 'Submission saved.'};
-    } catch (error) {
-      throw ApiException('Failed to save WFH monitoring submission: $error');
-    }
+    return _guard(
+      'Submit WFH monitoring',
+      'Unable to save your WFH submission. Please try again.',
+      () async {
+        final userId = _toIntId((await _currentUserRow())?['id']);
+        if (userId == null) {
+          throw ApiException('User profile not found.');
+        }
+        final employeeId = await _requireEmployeeId();
+
+        // Same rule as the web: one pending/approved submission per date.
+        final existing = await _client
+            .from('wfh_monitoring_submissions')
+            .select('id')
+            .eq('employee_id', employeeId)
+            .eq('wfh_date', date)
+            .inFilter('status', ['pending', 'approved'])
+            .limit(1);
+        if (existing.isNotEmpty) {
+          throw ApiException(
+            'You already have a pending or approved WFH submission for that date.',
+          );
+        }
+
+        final now = DateTime.now().toIso8601String();
+        final rows = await _client
+            .from('wfh_monitoring_submissions')
+            .insert({
+              'employee_id': employeeId,
+              'submitted_by': userId,
+              'wfh_date': date,
+              'time_in': timeIn,
+              'time_out': timeOut,
+              'file_path': filePath,
+              'original_filename': originalFilename,
+              'status': 'pending',
+              'submitted_at': now,
+              'created_at': now,
+              'updated_at': now,
+            })
+            .select('id')
+            .limit(1);
+        final list = _toMapList(rows);
+        return {
+          'id': list.isNotEmpty ? list.first['id'] : null,
+          'message': 'Submission saved.',
+        };
+      },
+    );
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() async {
-    final employee = await _currentEmployee();
-    if (employee == null || employee['id'] == null) {
-      throw ApiException('Employee profile not found.');
-    }
+  Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() => _guard(
+        'Load WFH submissions',
+        'Unable to load your WFH submissions. Please try again.',
+        () async {
+          final employeeId = await _requireEmployeeId();
+          final rows = await _client
+              .from('wfh_monitoring_submissions')
+              .select(
+                'id,employee_id,wfh_date,time_in,time_out,monitoring_link,'
+                'file_path,original_filename,status,submitted_at,reviewed_at,'
+                'review_notes,created_at,updated_at',
+              )
+              .eq('employee_id', employeeId)
+              .order('submitted_at', ascending: false);
+          return _toMapList(rows);
+        },
+      );
 
-    final employeeId = _toIntId(employee['id']);
+  /// Minimum supported Android build, from the `mobile_app_versions` table.
+  /// Returns null when no policy is configured or it cannot be read.
+  @override
+  Future<Map<String, dynamic>?> getMobileVersionPolicy() async {
+    try {
+      final rows = await _client
+          .from('mobile_app_versions')
+          .select('min_version_code,latest_version_name,update_url,message')
+          .eq('platform', 'android')
+          .limit(1);
+      final list = _toMapList(rows);
+      return list.isEmpty ? null : list.first;
+    } catch (error) {
+      appLog('Version policy unavailable', error.runtimeType);
+      return null;
+    }
+  }
+
+  Future<int> _requireEmployeeId() async {
+    final employeeId = _toIntId((await _currentEmployee())?['id']);
     if (employeeId == null) {
       throw ApiException('Employee profile not found.');
     }
-
-    try {
-      final rows = await _client
-          .from('wfh_monitoring_submissions')
-          .select('*')
-          .eq('employee_id', employeeId)
-          .order('submitted_at', ascending: false);
-      return _toMapList(rows);
-    } catch (error) {
-      throw ApiException('Failed to fetch WFH monitoring submissions: $error');
-    }
-  }
-
-  String _contentTypeFromFileName(String fileName) {
-    final lower = fileName.toLowerCase();
-    if (lower.endsWith('.pdf')) {
-      return 'application/pdf';
-    }
-    if (lower.endsWith('.doc')) {
-      return 'application/msword';
-    }
-    if (lower.endsWith('.docx')) {
-      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    }
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    return 'application/octet-stream';
-  }
-
-  String? _extractProfilePhotoPath(
-    Map<String, dynamic> user,
-    Map<String, dynamic> employee,
-  ) {
-    const keys = [
-      'profilephoto_path',
-      'profile_photo_path',
-      'profile_image_path',
-      'avatar_path',
-      'photo_path',
-      'image_path',
-      'profile_photo',
-      'avatar_url',
-      'photo_url',
-      'image_url',
-    ];
-
-    for (final key in keys) {
-      final employeeValue = (employee[key] ?? '').toString().trim();
-      if (employeeValue.isNotEmpty) {
-        return employeeValue;
-      }
-
-      final userValue = (user[key] ?? '').toString().trim();
-      if (userValue.isNotEmpty) {
-        return userValue;
-      }
-    }
-
-    return null;
-  }
-
-  Future<String?> _tryCreateSignedUrlFromStoredPath(String storedPath) async {
-    final normalized = storedPath.trim();
-    if (normalized.isEmpty) {
-      return null;
-    }
-
-    // If DB already stores a complete URL, use it directly.
-    final uri = Uri.tryParse(normalized);
-    if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
-      return normalized;
-    }
-
-    // Accept Supabase public object paths like:
-    // /storage/v1/object/public/<bucket>/<object>
-    const publicObjectPrefix = '/storage/v1/object/public/';
-    final publicIdx = normalized.indexOf(publicObjectPrefix);
-    if (publicIdx >= 0) {
-      final tail = normalized.substring(publicIdx + publicObjectPrefix.length);
-      final slash = tail.indexOf('/');
-      if (slash > 0 && slash < tail.length - 1) {
-        final bucket = tail.substring(0, slash);
-        final objectPath = tail.substring(slash + 1);
-        try {
-          return _client.storage.from(bucket).getPublicUrl(objectPath);
-        } catch (_) {
-          // Continue to other formats.
-        }
-      }
-    }
-
-    if (normalized.startsWith('public/')) {
-      final tail = normalized.substring('public/'.length);
-      final slash = tail.indexOf('/');
-      if (slash > 0 && slash < tail.length - 1) {
-        final bucket = tail.substring(0, slash);
-        final objectPath = tail.substring(slash + 1);
-        try {
-          return _client.storage.from(bucket).getPublicUrl(objectPath);
-        } catch (_) {
-          // Continue to other formats.
-        }
-      }
-    }
-
-    for (final bucket in _profilePhotoBuckets) {
-      if (normalized.startsWith('$bucket/')) {
-        final objectPath = normalized.substring(bucket.length + 1);
-        try {
-          return await _client.storage
-              .from(bucket)
-              .createSignedUrl(objectPath, 60 * 60 * 24 * 30);
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-
-    for (final bucket in _profilePhotoBuckets) {
-      try {
-        return await _client.storage
-            .from(bucket)
-            .createSignedUrl(normalized, 60 * 60 * 24 * 30);
-      } catch (_) {
-        // Try next bucket.
-      }
-    }
-
-    return null;
-  }
-
-  Future<void> _persistProfilePhotoPath(String path) async {
-    final employee = await _currentEmployee();
-
-    // Prefer updating the `employees` row (user requested canonical storage there).
-    if (employee == null || employee['id'] == null) {
-      throw ApiException(
-        'Employee profile not found while saving profile photo path.',
-      );
-    }
-
-    try {
-      final numericEmployeeId = _toIntId(employee['id']);
-      if (numericEmployeeId == null) {
-        throw ApiException(
-          'Employee profile not found while saving profile photo path.',
-        );
-      }
-
-      await _client
-          .from('employees')
-          .update({'profilephoto_path': path})
-          .eq('id', numericEmployeeId);
-    } on PostgrestException catch (error) {
-      throw ApiException(
-        'Profile photo uploaded, but failed to save employees.profilephoto_path: ${error.message}',
-      );
-    } catch (error) {
-      throw ApiException(
-        'Profile photo uploaded, but failed to save employees.profilephoto_path: $error',
-      );
-    }
+    return employeeId;
   }
 
   Future<void> _loadCurrentUserFromTable(String email) async {
     try {
-      final rows = await _client
-          .from('users')
-          .select('*')
-          .ilike('email', email)
-          .limit(1);
-
-      final list = _toMapList(rows);
-      if (list.isNotEmpty) {
-        _user = list.first;
+      // `ilike` treats `_`/`%` as wildcards, so confirm the match in Dart.
+      final rows = _toMapList(
+        await _client
+            .from('users')
+            .select(_userColumns)
+            .ilike('email', email)
+            .limit(5),
+      );
+      final match = rows.where(
+        (row) =>
+            (row['email'] ?? '').toString().trim().toLowerCase() ==
+            email.toLowerCase(),
+      );
+      if (match.isNotEmpty) {
+        _user = match.first;
         return;
       }
-    } catch (_) {
-      // Fallback to auth metadata when direct users-table read is unavailable.
+    } catch (error) {
+      // Fallback to auth metadata when the users row is not readable.
+      appLog('Users row lookup failed', error.runtimeType);
     }
 
     final authUser = _client.auth.currentUser;
@@ -1566,45 +955,6 @@ class ApiClient implements AppApiClient {
     };
   }
 
-  Future<void> _provisionAuthUserIfMissing({
-    required String email,
-    required String password,
-    required dynamic employeeId,
-  }) async {
-    try {
-      final authResult = await _client.auth.signUp(
-        email: email,
-        password: password,
-      );
-
-      final authUserId = authResult.user?.id ?? _client.auth.currentUser?.id;
-      if (authUserId == null || authUserId.trim().isEmpty) {
-        return;
-      }
-
-      await _syncEmployeeAuthId(
-        employeeId: employeeId,
-        authUserId: authUserId,
-      );
-    } catch (_) {
-      // If the auth account already exists or signup is disabled, keep login working.
-    }
-  }
-
-  Future<void> _syncEmployeeAuthId({
-    required dynamic employeeId,
-    required String authUserId,
-  }) async {
-    try {
-      await _client
-          .from('employees')
-          .update({'auth_id': authUserId})
-          .eq('id', employeeId);
-    } catch (_) {
-      // Keep login working even if auth_id sync fails.
-    }
-  }
-
   Future<Map<String, dynamic>?> _currentUserRow() async {
     if (_user != null) {
       return _user;
@@ -1615,26 +965,18 @@ class ApiClient implements AppApiClient {
       return null;
     }
 
-    await _loadCurrentUserFromTable(email);
+    await _loadCurrentUserFromTable(email.trim().toLowerCase());
     return _user;
   }
 
+  /// Resolves the signed-in employee from the Supabase Auth identity: first
+  /// by `employees.auth_id = auth.uid()`, then by the verified Auth email.
   Future<Map<String, dynamic>?> _currentEmployee() async {
-    final authUserId = _client.auth.currentUser?.id.trim() ?? '';
-    final user = await _currentUserRow();
-    final email = (user?['email'] ?? _client.auth.currentUser?.email ?? '')
-        .toString()
-        .trim();
-    final userId = (user?['id'] ?? '').toString().trim();
-    final userEmployeeId = (user?['employee_id'] ?? '').toString().trim();
-    final userAuthId = (user?['auth_id'] ?? '').toString().trim();
-
-    final employeeIdCandidates = <String>{
-      if (userId.isNotEmpty) userId,
-      if (authUserId.isNotEmpty) authUserId,
-      if (userEmployeeId.isNotEmpty) userEmployeeId,
-      if (userAuthId.isNotEmpty) userAuthId,
-    }.toList();
+    final authUser = _client.auth.currentUser;
+    if (authUser == null) return null;
+    final authUserId = authUser.id.trim();
+    final email = (authUser.email ?? '').trim();
+    await _currentUserRow();
 
     Future<List<Map<String, dynamic>>> fetchByAuthId() async {
       if (authUserId.isEmpty) {
@@ -1643,12 +985,13 @@ class ApiClient implements AppApiClient {
       try {
         final rows = await _client
             .from('employees')
-            .select('*')
+            .select(_employeeColumns)
             .eq('auth_id', authUserId)
             .isFilter('deleted_at', null)
             .limit(1);
         return _toMapList(rows);
-      } catch (_) {
+      } catch (error) {
+        appLog('Employee lookup by auth id failed', error.runtimeType);
         return const [];
       }
     }
@@ -1663,7 +1006,7 @@ class ApiClient implements AppApiClient {
         // (`Employee::where('email', ...)`, soft-deleted rows excluded).
         final rows = await _client
             .from('employees')
-            .select('*')
+            .select(_employeeColumns)
             .ilike('email', email)
             .isFilter('deleted_at', null)
             .order('id', ascending: true);
@@ -1678,36 +1021,8 @@ class ApiClient implements AppApiClient {
           (row) => (row['email'] ?? '').toString().trim() == email,
         );
         return exact.isNotEmpty ? [exact.first] : matches.take(1).toList();
-      } catch (_) {
-        return const [];
-      }
-    }
-
-    Future<List<Map<String, dynamic>>> fetchByUserId() async {
-      if (employeeIdCandidates.isEmpty) {
-        return const [];
-      }
-      try {
-        // `employees.user_id` is typically a numeric (bigint) column.
-        // Filter the candidate list to numeric values only to avoid
-        // Postgres errors like "invalid input syntax for type bigint"
-        // when auth UIDs (UUID strings) are present.
-        final numericCandidates = employeeIdCandidates
-            .where((c) => int.tryParse(c.toString().trim()) != null)
-            .map((c) => int.parse(c.toString().trim()))
-            .toList();
-
-        if (numericCandidates.isEmpty) {
-          return const [];
-        }
-
-        final rows = await _client
-            .from('employees')
-            .select('*')
-            .inFilter('user_id', numericCandidates)
-            .limit(1);
-        return _toMapList(rows);
-      } catch (_) {
+      } catch (error) {
+        appLog('Employee lookup by email failed', error.runtimeType);
         return const [];
       }
     }
@@ -1715,9 +1030,6 @@ class ApiClient implements AppApiClient {
     var list = await fetchByAuthId();
     if (list.isEmpty) {
       list = await fetchByEmail();
-    }
-    if (list.isEmpty) {
-      list = await fetchByUserId();
     }
     if (list.isEmpty) {
       return null;
@@ -1743,9 +1055,9 @@ class ApiClient implements AppApiClient {
       final currentUserName = (_user?['name'] ?? '').toString();
       final userEmail = (_user?['email'] ?? '').toString();
       if (currentUserName.isEmpty || currentUserName == userEmail) {
-        final empName = (employee['name'] ?? employee['full_name'] ?? '')
-            .toString()
-            .trim();
+        final empName =
+            '${employee['first_name'] ?? ''} ${employee['last_name'] ?? ''}'
+                .trim();
         if (empName.isNotEmpty) {
           _user!['name'] = empName;
         }
@@ -1776,9 +1088,10 @@ class ApiClient implements AppApiClient {
     if (value == null) return null;
     return int.tryParse(value.toString().trim());
   }
-
 }
 
+/// Error whose [message] is always safe to show to the employee. Technical
+/// details are logged (debug builds only) where the error is created.
 class ApiException implements Exception {
   ApiException(this.message, {this.statusCode});
 
@@ -1786,5 +1099,16 @@ class ApiException implements Exception {
   final int? statusCode;
 
   @override
-  String toString() => 'ApiException($statusCode): $message';
+  String toString() => message;
+}
+
+/// User-safe text for any error: [ApiException] / validation messages are
+/// shown as-is; anything else becomes [fallback].
+String userMessageFor(
+  Object? error, {
+  String fallback = 'Something went wrong. Please try again.',
+}) {
+  if (error is ApiException) return error.message;
+  if (error is UploadValidationException) return error.message;
+  return fallback;
 }

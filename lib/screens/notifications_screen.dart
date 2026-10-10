@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/app_nav.dart';
 import '../providers/notifications_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
@@ -145,7 +146,7 @@ class NotificationsScreen extends ConsumerWidget {
                       vertical: 38,
                     ),
                     child: Text(
-                      'Failed to load notifications:\n$error',
+                      userMessageFor(error),
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Color(0xFF4B556A),

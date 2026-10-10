@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdfx/pdfx.dart';
 
+import '../config/app_config.dart';
+import '../utils/app_log.dart';
+
 class FileViewerScreen extends StatefulWidget {
   const FileViewerScreen({super.key, required this.url, this.title});
 
@@ -55,12 +58,11 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         ext == 'webp';
   }
 
-  /// Logs technical details for developers only; the signed URL's token
-  /// (query string) is stripped so it never reaches logs or the UI.
+  /// Logs technical details for developers only; the file URL (storage path
+  /// and signed token) is redacted so it never reaches logs or the UI.
   void _logError(String stage, Object error) {
-    final safeUrl = widget.url.split('?').first;
-    final details = error.toString().replaceAll(widget.url, safeUrl);
-    debugPrint('FileViewer $stage failed for $safeUrl: $details');
+    final details = error.toString().replaceAll(widget.url, '<file url>');
+    appLog('FileViewer $stage failed: $details');
   }
 
   Future<void> _loadFile() async {
@@ -72,18 +74,13 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     });
 
     try {
+      // Signed Supabase Storage URLs are HTTPS; refuse anything else.
+      if (!AppConfig.isHttpsUrl(widget.url)) {
+        throw Exception('Refusing to download a non-HTTPS file URL.');
+      }
       final response = await http
           .get(Uri.parse(widget.url))
           .timeout(const Duration(seconds: 30));
-
-      final head = response.bodyBytes.take(5).toList();
-      debugPrint(
-        'FileViewer download: ${widget.url.split('?').first} '
-        'status=${response.statusCode} '
-        'content-type=${response.headers['content-type']} '
-        'bytes=${response.bodyBytes.length} '
-        'starts-with-%PDF=${String.fromCharCodes(head) == '%PDF-'}',
-      );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
@@ -220,7 +217,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             bytes,
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                Center(child: Text('Unable to display image:\n$error')),
+                const Center(child: Text('Unable to display this image.')),
           ),
         ),
       );

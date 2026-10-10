@@ -1,9 +1,10 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/api_client.dart';
+import '../utils/app_log.dart';
 import 'account_provider.dart';
 import 'api_client_provider.dart';
 import 'dashboard_provider.dart';
@@ -61,7 +62,14 @@ final sessionControllerProvider =
 class SessionController
     extends Notifier<SessionState> {
   /// Device-local marker: "this login session accepted this version".
+  /// Kept in secure storage because it contains the Supabase user id.
   static const _privacyAckPrefsKey = 'privacy_notice_session_ack';
+  static const _secureStorage = FlutterSecureStorage();
+
+  /// Inactivity timeout: a session left in the background longer than this
+  /// is signed out and the employee must log in again.
+  static const idleTimeout = Duration(minutes: 15);
+  static const _backgroundedAtKey = 'session_backgrounded_at';
 
   @override
   SessionState build() {
@@ -88,10 +96,9 @@ class SessionController
     final key = _loginSessionAckKey();
     if (key == null) return false;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_privacyAckPrefsKey) == key;
+      return await _secureStorage.read(key: _privacyAckPrefsKey) == key;
     } catch (error) {
-      debugPrint('Privacy Notice session check failed: $error');
+      appLog('Privacy Notice session check failed', error.runtimeType);
       return false;
     }
   }
@@ -100,24 +107,69 @@ class SessionController
     final key = _loginSessionAckKey();
     if (key == null) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_privacyAckPrefsKey, key);
+      await _secureStorage.write(key: _privacyAckPrefsKey, value: key);
     } catch (error) {
-      debugPrint('Privacy Notice session marker not saved: $error');
+      appLog('Privacy Notice session marker not saved', error.runtimeType);
     }
   }
 
   Future<void> _forgetLoginSessionAck() async {
     try {
+      await _secureStorage.delete(key: _privacyAckPrefsKey);
+      // Remove the plaintext copy written by earlier app versions.
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_privacyAckPrefsKey);
     } catch (error) {
-      debugPrint('Privacy Notice session marker not cleared: $error');
+      appLog('Privacy Notice session marker not cleared', error.runtimeType);
     }
+  }
+
+  /// Called when the app goes to the background. Persisted so the timeout
+  /// also applies if Android kills the app while it is in the background.
+  Future<void> markBackgrounded() async {
+    if (!state.isLoggedIn) return;
+    try {
+      await _secureStorage.write(
+        key: _backgroundedAtKey,
+        value: DateTime.now().millisecondsSinceEpoch.toString(),
+      );
+    } catch (error) {
+      appLog('Background timestamp not saved', error.runtimeType);
+    }
+  }
+
+  /// True when the app was in the background for at least [idleTimeout].
+  /// Clears the marker either way.
+  Future<bool> _consumeIdleExpiry() async {
+    try {
+      final raw = await _secureStorage.read(key: _backgroundedAtKey);
+      await _secureStorage.delete(key: _backgroundedAtKey);
+      final since = int.tryParse(raw ?? '');
+      if (since == null) return false;
+      final away = DateTime.now().millisecondsSinceEpoch - since;
+      return away < 0 || away >= idleTimeout.inMilliseconds;
+    } catch (error) {
+      appLog('Idle check failed', error.runtimeType);
+      return false;
+    }
+  }
+
+  /// Called when the app returns to the foreground. Signs out an idle
+  /// session and returns true if it did.
+  Future<bool> signOutIfIdle() async {
+    if (!await _consumeIdleExpiry() || !state.isLoggedIn) return false;
+    await signOut();
+    return true;
   }
 
   Future<void> _bootstrapSession() async {
     final api = ref.read(apiClientProvider);
+
+    // A saved login that sat idle past the timeout must sign in again.
+    if (await _consumeIdleExpiry()) {
+      await api.logout();
+      await _forgetLoginSessionAck();
+    }
 
     try {
       final allowed = await api.hasEmployeeAccess();
@@ -184,10 +236,11 @@ class SessionController
       );
 
       return null;
-    } on ApiException catch (error) {
-      return error.message;
     } catch (error) {
-      return error.toString();
+      return userMessageFor(
+        error,
+        fallback: 'Unable to sign in right now. Please try again.',
+      );
     }
   }
 
@@ -207,11 +260,8 @@ class SessionController
     await api.logout();
     await _forgetLoginSessionAck();
 
-    state = state.copyWith(
-      isLoggedIn: false,
-      authUid: null,
-      privacyAcknowledged: false,
-    );
+    // A fresh state (copyWith cannot clear authUid back to null).
+    state = const SessionState(isInitializing: false, isLoggedIn: false);
 
     ref.invalidate(dashboardProvider);
     ref.invalidate(accountProvider);

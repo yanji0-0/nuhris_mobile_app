@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../models/academic_calendar_entry.dart';
 import '../navigation/app_nav.dart';
 import '../providers/academic_calendar_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/dashboard_calendar.dart';
@@ -54,7 +55,11 @@ class _AcademicCalendarScreenState
         onNavigate: widget.onNavigate,
         onSignOut: widget.onSignOut,
       ),
+      // Re-fetching on open keeps the loaded calendar on screen; the spinner
+      // and Retry only appear when no calendar data has loaded at all.
       body: calendarState.when(
+        skipLoadingOnReload: true,
+        skipError: true,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stackTrace) => Center(
           child: Padding(
@@ -63,7 +68,7 @@ class _AcademicCalendarScreenState
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Failed to load Academic Calendar: $error',
+                  userMessageFor(error),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/app_config.dart';
 import '../navigation/app_nav.dart';
 import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
+import '../utils/app_log.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
 import '../theme/app_theme.dart';
@@ -37,6 +40,8 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
     _loadSubmissions();
   }
 
+  bool _hasLoaded = false;
+
   Future<void> _loadSubmissions() async {
     try {
       final api = ref.read(apiClientProvider);
@@ -44,12 +49,19 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
       if (!mounted) return;
       setState(() {
         _submissions = data;
+        _hasLoaded = true;
+        _error = null;
         _isLoading = false;
       });
     } catch (error) {
       if (!mounted) return;
+      if (_hasLoaded) {
+        // Background refresh failed: keep showing the current list.
+        appLog('WFH background refresh failed', error.runtimeType);
+        return;
+      }
       setState(() {
-        _error = error.toString();
+        _error = userMessageFor(error);
         _isLoading = false;
       });
     }
@@ -61,8 +73,12 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
     }
 
     _lastRefreshToken = refreshToken;
-    _isLoading = true;
-    _error = null;
+    // Silent background refresh: keep the current list (and scroll) on
+    // screen; only the very first load shows the spinner.
+    if (!_hasLoaded) {
+      _isLoading = true;
+      _error = null;
+    }
     _loadSubmissions();
   }
 
@@ -137,8 +153,9 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
     final normalized = _normalizeStatus(status).toLowerCase();
     if (normalized == 'approved') return const Color(0xFF10B981);
     if (normalized == 'pending') return const Color(0xFFF59E0B);
-    if (normalized == 'declined' || normalized == 'rejected')
+    if (normalized == 'declined' || normalized == 'rejected') {
       return const Color(0xFFEF4444);
+    }
     return const Color(0xFF6B7280);
   }
 
@@ -157,16 +174,26 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
       return;
     }
 
-    final uri = Uri.tryParse(link);
-    final isWebLink =
-        uri != null && (uri.isScheme('http') || uri.isScheme('https'));
+    // Only secure https:// links are opened; http:// and other schemes are
+    // refused rather than handed to the browser or another app.
+    final uri = AppConfig.safeExternalLink(link);
+    if (uri == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This monitoring link cannot be opened because it is not a '
+            'secure https:// link.',
+          ),
+        ),
+      );
+      return;
+    }
+
     var opened = false;
-    if (isWebLink) {
-      try {
-        opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } catch (error) {
-        debugPrint('WFH monitoring link failed to open: $error');
-      }
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (error) {
+      appLog('WFH monitoring link failed to open', error.runtimeType);
     }
 
     if (!opened) {
@@ -233,16 +260,16 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                           ),
                         ).then((_) => _loadSubmissions());
                       },
-                      child: const Text(
-                        'Upload New',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF2B2F36),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
+                      ),
+                      child: const Text(
+                        'Upload New',
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -393,7 +420,7 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                                         decoration: BoxDecoration(
                                           color: _statusColor(
                                             status,
-                                          ).withOpacity(0.2),
+                                          ).withValues(alpha: 0.2),
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),
@@ -491,7 +518,7 @@ class _WFHMonitoringScreenState extends ConsumerState<WFHMonitoringScreen> {
                                         decoration: BoxDecoration(
                                           color: _statusColor(
                                             status,
-                                          ).withOpacity(0.2),
+                                          ).withValues(alpha: 0.2),
                                           borderRadius: BorderRadius.circular(
                                             6,
                                           ),

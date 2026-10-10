@@ -7,17 +7,17 @@ abstract class AppApiClient {
   Future<void> login({required String email, required String password});
   Future<void> logout();
 
+  /// Step-up authentication: confirms the signed-in user's password with
+  /// Supabase Auth before a sensitive operation.
+  Future<bool> reauthenticate(String password);
+
   // Notifications / dashboard / account
   Future<List<Map<String, dynamic>>> getNotifications();
   Future<Map<String, dynamic>> getDashboard();
   Future<Map<String, dynamic>> getAccount();
 
-  // Profile photo
+  // Profile photo (read-only; photos are managed on the web portal)
   Future<String?> getProfilePhotoUrl();
-  Future<Map<String, dynamic>> uploadProfilePhoto({required String filePath});
-
-  // Account management
-  Future<void> updateAccount(Map<String, dynamic> updates);
 
   // Notifications helpers
   Future<void> markAllNotificationsRead();
@@ -38,11 +38,11 @@ abstract class AppApiClient {
   // Leave / WFH monitoring
   Future<Map<String, dynamic>> getLeaveMonitoring();
   Future<Map<String, dynamic>> submitWfhMonitoring({
-    required dynamic employeeId,
-    required String wfhDate,
-    String? timeIn,
-    String? timeOut,
+    required DateTime wfhDate,
+    required String timeIn,
+    required String timeOut,
     required String filePath,
+    required String originalFilename,
   });
   Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions();
 
@@ -55,9 +55,10 @@ abstract class AppApiClient {
   // Files in the shared "credentials" storage bucket (used by WFH monitoring)
   Future<String?> getCredentialFileUrl(String storedPath);
   Future<String> uploadEmployeeCredentialFile({
-    required dynamic employeeId,
-    dynamic employeeAlternateId,
     required Uint8List fileBytes,
     required String originalFileName,
   });
+
+  /// Minimum-version policy for update enforcement, or null if unavailable.
+  Future<Map<String, dynamic>?> getMobileVersionPolicy();
 }

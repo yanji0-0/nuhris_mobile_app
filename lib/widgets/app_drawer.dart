@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../navigation/app_nav.dart';
 import '../providers/account_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
 import '../theme/app_theme.dart';
+import '../utils/app_log.dart';
 import '../utils/employee_initials.dart';
+
+/// Installed app version (e.g. "1.1.0"), shown in the drawer footer.
+final appVersionProvider = FutureProvider<String>(
+  (ref) async => (await PackageInfo.fromPlatform()).version,
+);
 
 class AppDrawer extends ConsumerWidget {
   const AppDrawer({
@@ -20,7 +28,10 @@ class AppDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final accountAsync = ref.watch(accountProvider);
 
+    // Keep the open drawer as-is during background refreshes.
     return accountAsync.when(
+      skipLoadingOnReload: true,
+      skipError: true,
       data: (account) {
         final user = (account['user'] as Map?)?.cast<String, dynamic>() ??
             const <String, dynamic>{};
@@ -119,7 +130,10 @@ class AppDrawer extends ConsumerWidget {
                   child: Row(
                     children: [
                       Text(
-                        'HRIS · v1.0',
+                        ref.watch(appVersionProvider).maybeWhen(
+                              data: (version) => 'HRIS · v$version',
+                              orElse: () => 'HRIS',
+                            ),
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.82),
                           fontSize: 13,
@@ -140,20 +154,27 @@ class AppDrawer extends ConsumerWidget {
           child: Center(child: CircularProgressIndicator()),
         ),
       ),
-      error: (err, st) => Drawer(
-        backgroundColor: const Color(0xFF0A1B66),
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Failed to load account: $err',
-                style: const TextStyle(color: Colors.white),
+      error: (err, st) {
+        appLog('Drawer account load failed', err.runtimeType);
+        return Drawer(
+          backgroundColor: const Color(0xFF0A1B66),
+          child: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  userMessageFor(
+                    err,
+                    fallback: 'Unable to load your account. Please try again.',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -251,6 +272,8 @@ class _Header extends ConsumerWidget {
             child: Row(
               children: [
                 profilePhotoAsync.when(
+                  skipLoadingOnReload: true,
+                  skipError: true,
                   data: (photoUrl) {
                     final hasPhoto =
                         photoUrl != null && photoUrl.trim().isNotEmpty;

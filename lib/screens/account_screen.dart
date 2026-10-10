@@ -5,10 +5,11 @@ import 'package:intl/intl.dart';
 import '../navigation/app_nav.dart';
 import '../providers/account_provider.dart';
 import '../providers/api_client_provider.dart';
-import '../services/api_client.dart' show ApiException;
+import '../services/api_client.dart' show ApiException, userMessageFor;
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
+import '../widgets/nuhris_website_card.dart';
 import 'file_viewer_screen.dart';
 import '../utils/employee_initials.dart';
 
@@ -53,7 +54,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     _accountSubscription = ref.listenManual<AsyncValue<Map<String, dynamic>>>(
       accountProvider,
       (prev, next) {
+        // Background refreshes keep the current data instead of flipping the
+        // page back to its loading state.
         next.when(
+          skipLoadingOnReload: true,
+          skipError: true,
           data: (payload) {
             final user =
                 (payload['user'] as Map?)?.cast<String, dynamic>() ?? {};
@@ -165,6 +170,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   Widget build(BuildContext context) {
     final accountAsync = ref.watch(accountProvider);
     final initials = accountAsync.maybeWhen(
+      skipLoadingOnReload: true,
+      skipError: true,
       data: employeeInitialsFromAccount,
       orElse: () => 'E',
     );
@@ -326,6 +333,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           ),
           const SizedBox(height: 10),
           const _AcademicDegreesCard(),
+          const SizedBox(height: 10),
+          const NuhrisWebsiteCard(),
         ],
       ),
     );
@@ -383,7 +392,11 @@ class _AcademicDegreesCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final degreesAsync = ref.watch(employeeDegreesProvider);
 
+    // Keep the current degrees visible during background refreshes so the
+    // card does not collapse to a spinner (which shifted the scroll).
     final Widget body = degreesAsync.when(
+      skipLoadingOnReload: true,
+      skipError: true,
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 20),
         child: Center(child: CircularProgressIndicator()),
@@ -392,7 +405,7 @@ class _AcademicDegreesCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Failed to load academic degrees: $error',
+            userMessageFor(error),
             style: const TextStyle(color: AppColors.red, fontSize: 13),
           ),
           TextButton(
@@ -490,23 +503,10 @@ class _DegreeTileState extends ConsumerState<_DegreeTile> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
-    final degree = widget.degree ?? const {};
-    debugPrint(
-      'DegreePDF open: employee_id=${degree['employee_id']} '
-      'degree_level=${degree['degree_level']} '
-      'credential_type=${degree['credential_type']} file_path=$filePath',
-    );
-
     try {
       final url = await ref
           .read(apiClientProvider)
           .getCredentialFileUrl(filePath);
-      // Never log the signed token (query string).
-      debugPrint(
-        'DegreePDF signed url: '
-        '${url == null || url.isEmpty ? 'NULL/EMPTY' : url.split('?').first} '
-        '(token present: ${url?.contains('token=') ?? false})',
-      );
       if (!mounted) return;
       if (url == null || url.isEmpty) {
         throw ApiException('The file for this degree could not be found.');
@@ -516,8 +516,7 @@ class _DegreeTileState extends ConsumerState<_DegreeTile> {
           builder: (_) => FileViewerScreen(url: url, title: widget.label),
         ),
       );
-    } catch (error) {
-      debugPrint('DegreePDF signed url failed: $error');
+    } catch (_) {
       if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(

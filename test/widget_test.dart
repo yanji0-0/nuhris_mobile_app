@@ -1,113 +1,115 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:typed_data';
+import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nuhris_mobile_app/app_shell.dart';
-import 'package:nuhris_mobile_app/models/academic_calendar_entry.dart';
-import 'package:nuhris_mobile_app/providers/api_client_provider.dart';
-import 'package:nuhris_mobile_app/services/api_client_contract.dart';
+import 'package:nuhris_mobile_app/providers/session_provider.dart';
+import 'package:nuhris_mobile_app/providers/startup_checks_provider.dart';
 import 'package:nuhris_mobile_app/screens/auth/sign_in_screen.dart';
+import 'package:nuhris_mobile_app/security/device_integrity.dart';
 
-class FakeApiClient implements AppApiClient {
+/// Signed-out session that never touches Supabase.
+class _SignedOutSession extends SessionController {
   @override
-  Future<void> clearAllNotifications() async {}
-
-  @override
-  Future<List<AcademicCalendarEntry>> getAcademicCalendarEntries() async => [];
-
-  @override
-  Future<List<Map<String, dynamic>>> getNotifications() async => [];
-
-  @override
-  Future<Map<String, dynamic>?> getCurrentEmployeeScheduleSubmission() async =>
-      null;
-
-  @override
-  Future<bool> hasEmployeeAccess() async => false;
-
-  @override
-  Future<void> login({required String email, required String password}) async {}
-
-  @override
-  Future<void> logout() async {}
-
-  @override
-  Future<void> markAllNotificationsRead() async {}
-
-  @override
-  Future<void> markNotificationRead(String notificationId) async {}
-
-  @override
-  Future<Map<String, dynamic>> getAccount() async => {};
-
-  @override
-  Future<Map<String, dynamic>> getDashboard() async => {};
-
-  @override
-  Future<String?> getProfilePhotoUrl() async => null;
-
-  @override
-  Future<Map<String, dynamic>> uploadProfilePhoto({
-    required String filePath,
-  }) async => {'url': ''};
-
-  @override
-  Future<void> updateAccount(Map<String, dynamic> updates) async {}
-
-  @override
-  Future<List<Map<String, dynamic>>> getAttendanceDtr() async => [];
-
-  @override
-  Future<Map<String, dynamic>> submitEmployeeSchedule({
-    required String termLabel,
-    required List<Map<String, dynamic>> days,
-  }) async => {};
-
-  @override
-  Future<Map<String, dynamic>> getLeaveMonitoring() async => {};
-
-  @override
-  Future<Map<String, dynamic>> submitWfhMonitoring({
-    required dynamic employeeId,
-    required String wfhDate,
-    String? timeIn,
-    String? timeOut,
-    required String filePath,
-  }) async => {};
-
-  @override
-  Future<List<Map<String, dynamic>>> getWfhMonitoringSubmissions() async => [];
-
-  @override
-  Future<void> acknowledgePrivacyNotice({required String version}) async {}
-
-  @override
-  Future<List<Map<String, dynamic>>> getEmployeeDegrees() async => [];
-
-  @override
-  Future<String?> getCredentialFileUrl(String storedPath) async => null;
-
-  @override
-  Future<String> uploadEmployeeCredentialFile({
-    required dynamic employeeId,
-    dynamic employeeAlternateId,
-    required Uint8List fileBytes,
-    required String originalFileName,
-  }) async => '';
+  SessionState build() =>
+      const SessionState(isInitializing: false, isLoggedIn: false);
 }
 
-void main() {
-  testWidgets('App loads sign in screen', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [apiClientProvider.overrideWithValue(FakeApiClient())],
-        child: const AppShell(),
-      ),
+Widget _shell(StartupStatus status) => ProviderScope(
+      overrides: [
+        sessionControllerProvider.overrideWith(_SignedOutSession.new),
+        startupChecksProvider.overrideWith((ref) async => status),
+      ],
+      child: const AppShell(),
     );
 
+void main() {
+  testWidgets('Clean device shows the sign-in screen', (tester) async {
+    await tester.pumpWidget(
+      _shell(const StartupStatus(integrity: IntegrityReport.clean)),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(SignInScreen), findsOneWidget);
     expect(find.text('Sign in to your account to continue'), findsOneWidget);
+    // The non-functional "Remember me" option is gone; reset is real.
+    expect(find.text('Remember me'), findsNothing);
+    expect(find.text('Forgot password?'), findsOneWidget);
+  });
+
+  testWidgets('Password field disables suggestions and autocorrect',
+      (tester) async {
+    await tester.pumpWidget(
+      _shell(const StartupStatus(integrity: IntegrityReport.clean)),
+    );
+    await tester.pumpAndSettle();
+
+    final passwordFinder = find.byKey(SignInScreen.passwordFieldKey);
+    TextField field() => tester.widget<TextField>(passwordFinder);
+    expect(field().obscureText, isTrue);
+    expect(field().enableSuggestions, isFalse);
+    expect(field().autocorrect, isFalse);
+
+    // Still off after the employee reveals the password.
+    await tester.tap(find.byIcon(Icons.visibility_outlined));
+    await tester.pump();
+    expect(field().obscureText, isFalse);
+    expect(field().enableSuggestions, isFalse);
+    expect(field().autocorrect, isFalse);
+  });
+
+  testWidgets('Tampered app is blocked before sign-in', (tester) async {
+    await tester.pumpWidget(
+      _shell(
+        const StartupStatus(
+          integrity: IntegrityReport(
+            blockReason: 'This copy of NUHRIS has been modified.',
+            warnings: [],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('NUHRIS cannot run'), findsOneWidget);
+    expect(find.byType(SignInScreen), findsNothing);
+  });
+
+  testWidgets('Outdated version must update before sign-in', (tester) async {
+    await tester.pumpWidget(
+      _shell(
+        const StartupStatus(
+          integrity: IntegrityReport.clean,
+          update: UpdateRequirement(
+            message: 'Please update.',
+            updateUrl: 'https://example.edu/nuhris.apk',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Update required'), findsOneWidget);
+    expect(find.text('Update NUHRIS'), findsOneWidget);
+    expect(find.byType(SignInScreen), findsNothing);
+  });
+
+  testWidgets('Rooted device warning must be acknowledged', (tester) async {
+    await tester.pumpWidget(
+      _shell(
+        const StartupStatus(
+          integrity: IntegrityReport(
+            blockReason: null,
+            warnings: ['This device appears to be rooted.'],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Security warning'), findsOneWidget);
+    await tester.tap(find.text('I understand, continue'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignInScreen), findsOneWidget);
   });
 }

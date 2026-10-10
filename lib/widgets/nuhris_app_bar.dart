@@ -35,7 +35,10 @@ class NuhrisAppBar extends ConsumerWidget implements PreferredSizeWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final accountAsync = ref.watch(accountProvider);
     final profileAsync = ref.watch(profilePhotoProvider);
+    // Keep the current initials during background refreshes (no "E" flash).
     final initials = accountAsync.maybeWhen(
+      skipLoadingOnReload: true,
+      skipError: true,
       data: employeeInitialsFromAccount,
       orElse: () => 'E',
     );
@@ -165,6 +168,8 @@ class _AppBarAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final photoUrl = profileAsync.maybeWhen(
+      skipLoadingOnReload: true,
+      skipError: true,
       data: (url) => url,
       orElse: () => null,
     );

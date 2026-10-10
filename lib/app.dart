@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'navigation/app_nav.dart';
 import 'providers/app_refresh_provider.dart';
+import 'providers/session_provider.dart';
 
 import 'screens/account_screen.dart';
 import 'screens/academic_calendar_screen.dart';
@@ -60,10 +61,10 @@ class _NuhrisEmployeeAppState
   void didChangeAppLifecycleState(
     AppLifecycleState state,
   ) {
+    final session = ref.read(sessionControllerProvider.notifier);
     if (state ==
         AppLifecycleState.resumed) {
-      _triggerRefresh();
-      _startRefreshTimer();
+      _onResumed(session);
     } else if (state ==
             AppLifecycleState.paused ||
         state ==
@@ -71,7 +72,18 @@ class _NuhrisEmployeeAppState
         state ==
             AppLifecycleState.hidden) {
       _refreshTimer?.cancel();
+      if (state != AppLifecycleState.inactive) {
+        session.markBackgrounded();
+      }
     }
+  }
+
+  Future<void> _onResumed(SessionController session) async {
+    // Idle timeout: signing out rebuilds the shell into the sign-in screen.
+    if (await session.signOutIfIdle()) return;
+    if (!mounted) return;
+    _triggerRefresh();
+    _startRefreshTimer();
   }
 
   void _startRefreshTimer() {

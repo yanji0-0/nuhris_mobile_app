@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/api_client.dart';
+import '../utils/app_log.dart';
 import 'app_refresh_provider.dart';
 
 class NotificationItem {
@@ -246,10 +247,6 @@ class NotificationsNotifier
     _loading = true;
 
     try {
-      debugPrint(
-        '📥 Loading notifications...',
-      );
-
       final rows =
           await ApiClient.instance.getNotifications();
 
@@ -265,17 +262,13 @@ class NotificationsNotifier
           )
           .toList();
 
-      debugPrint(
-        '✅ Notifications loaded: ${items.length}',
-      );
-
       state = AsyncValue.data(items);
     } catch (error, stackTrace) {
-      debugPrint(
-        '❌ Failed to load notifications: $error',
-      );
+      appLog('Failed to load notifications: ${error.runtimeType}');
 
-      if (!_disposed) {
+      // A failed background/realtime re-fetch keeps the current list on
+      // screen; only a failed first load shows the error state.
+      if (!_disposed && !state.hasValue) {
         state = AsyncValue.error(
           error,
           stackTrace,
@@ -296,14 +289,11 @@ Future<void> _subscribeToRealtime() async {
   }
 
   if (_subscribed) {
-    debugPrint('⚠️ Realtime already subscribed.');
     return;
   }
 
   try {
     final supabase = Supabase.instance.client;
-
-    debugPrint('📡 Starting Notification Realtime...');
 
     _notificationChannel = supabase
         .channel('employee-notifications-realtime')
@@ -319,13 +309,6 @@ Future<void> _subscribeToRealtime() async {
             if (_disposed) {
               return;
             }
-
-            debugPrint('========================================');
-            debugPrint('🔔 NOTIFICATION EVENT RECEIVED');
-            debugPrint('📌 Event Type: ${payload.eventType}');
-            debugPrint('🆕 New Record: ${payload.newRecord}');
-            debugPrint('🗑️ Old Record: ${payload.oldRecord}');
-            debugPrint('========================================');
 
             unawaited(_load());
           },
@@ -343,85 +326,51 @@ Future<void> _subscribeToRealtime() async {
               return;
             }
 
-            debugPrint('========================================');
-            debugPrint('📢 ANNOUNCEMENT EVENT RECEIVED');
-            debugPrint('📌 Event Type: ${payload.eventType}');
-            debugPrint('🆕 New Announcement: ${payload.newRecord}');
-            debugPrint('🗑️ Old Announcement: ${payload.oldRecord}');
-            debugPrint('========================================');
-
             unawaited(_load());
           },
         )
 
         .subscribe(
       (status, error) {
-        debugPrint(
-          '📡 Notification Realtime status: $status',
-        );
-
         if (error != null) {
-          debugPrint(
-            '❌ Notification Realtime error: $error',
+          appLog(
+            'Notification Realtime error: ${error.runtimeType}',
           );
         }
 
         if (status ==
             RealtimeSubscribeStatus.subscribed) {
           _subscribed = true;
-
-          debugPrint(
-            '✅ Notification Realtime connected',
-          );
-
-          debugPrint(
-            '👂 Listening to:',
-          );
-
-          debugPrint(
-            '   • public.announcement_notifications',
-          );
-
-          debugPrint(
-            '   • public.announcements',
-          );
         }
 
         if (status ==
             RealtimeSubscribeStatus.channelError) {
           _subscribed = false;
 
-          debugPrint(
-            '❌ Notification Realtime channel error',
+          appLog(
+            'Notification Realtime channel error',
           );
         }
 
         if (status ==
             RealtimeSubscribeStatus.closed) {
           _subscribed = false;
-
-          debugPrint(
-            '⚠️ Notification Realtime channel closed',
-          );
         }
 
         if (status ==
             RealtimeSubscribeStatus.timedOut) {
           _subscribed = false;
 
-          debugPrint(
-            '⏱️ Notification Realtime timed out',
+          appLog(
+            'Notification Realtime timed out',
           );
         }
       },
     );
-  } catch (error, stackTrace) {
-    debugPrint(
-      '❌ Failed to subscribe to Notification Realtime:',
+  } catch (error) {
+    appLog(
+      'Failed to subscribe to Notification Realtime: ${error.runtimeType}',
     );
-
-    debugPrint('$error');
-    debugPrint('$stackTrace');
   }
 }
   // ============================================================
@@ -448,9 +397,8 @@ Future<void> _subscribeToRealtime() async {
       await _load();
       ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
-      debugPrint(
-        '❌ Failed to mark notification as read: '
-        '$error',
+      appLog(
+        'Failed to mark notification as read: ${error.runtimeType}',
       );
 
       rethrow;
@@ -469,9 +417,8 @@ Future<void> _subscribeToRealtime() async {
       await _load();
       ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
-      debugPrint(
-        '❌ Failed to mark all notifications as read: '
-        '$error',
+      appLog(
+        'Failed to mark all notifications as read: ${error.runtimeType}',
       );
 
       rethrow;
@@ -490,9 +437,8 @@ Future<void> _subscribeToRealtime() async {
       await _load();
       ref.read(appRefreshProvider.notifier).trigger();
     } catch (error) {
-      debugPrint(
-        '❌ Failed to clear notifications: '
-        '$error',
+      appLog(
+        'Failed to clear notifications: ${error.runtimeType}',
       );
 
       rethrow;
@@ -505,10 +451,6 @@ Future<void> _subscribeToRealtime() async {
 
   @override
   void dispose() {
-    debugPrint(
-      '🧹 Disposing Notification Realtime...',
-    );
-
     _disposed = true;
     _subscribed = false;
 

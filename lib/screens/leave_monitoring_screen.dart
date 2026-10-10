@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../navigation/app_nav.dart';
 import '../providers/app_refresh_provider.dart';
 import '../providers/api_client_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
+import '../utils/app_log.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
@@ -34,8 +36,14 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
     _future = _loadLeaveMonitoring();
   }
 
-  Future<Map<String, dynamic>> _loadLeaveMonitoring() {
-    return ref.read(apiClientProvider).getLeaveMonitoring();
+  /// Last successfully loaded payload, kept on screen while the periodic
+  /// background refresh re-fetches, so the page (and scroll) never resets.
+  Map<String, dynamic>? _lastPayload;
+
+  Future<Map<String, dynamic>> _loadLeaveMonitoring() async {
+    final payload = await ref.read(apiClientProvider).getLeaveMonitoring();
+    _lastPayload = payload;
+    return payload;
   }
 
   void _syncRefreshToken(int refreshToken) {
@@ -69,16 +77,22 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          // Spinner/error only before the first successful load; a
+          // background refresh keeps showing the previous data.
+          final cached = snapshot.data ?? _lastPayload;
+          if (cached == null &&
+              snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.hasError) {
+          if (cached != null && snapshot.hasError) {
+            appLog('Leave background refresh failed', snapshot.error.runtimeType);
+          } else if (snapshot.hasError) {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  'Failed to load leave data: ${snapshot.error}',
+                  userMessageFor(snapshot.error),
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.redAccent),
                 ),
@@ -86,7 +100,7 @@ class _LeaveMonitoringScreenState extends ConsumerState<LeaveMonitoringScreen> {
             );
           }
 
-          final payload = snapshot.data ?? {};
+          final payload = cached ?? const <String, dynamic>{};
           final balances = ((payload['balances'] as List?) ?? const [])
               .whereType<Map>()
               .map((e) => e.cast<String, dynamic>())

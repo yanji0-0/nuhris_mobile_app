@@ -1,21 +1,32 @@
 import 'package:flutter/material.dart';
 
+import '../utils/app_log.dart';
+
 /// Post-login gate showing the same Privacy Notice as the web portal
 /// (`resources/views/privacy/notice.blade.php`). The employee must tick the
 /// acknowledgment before Continue is enabled, or may log out instead.
+///
+/// [PrivacyNoticeScreen.readOnly] reopens the same notice from the app menu
+/// at any time, without the acknowledgment controls.
 class PrivacyNoticeScreen extends StatefulWidget {
   const PrivacyNoticeScreen({
     super.key,
     required this.version,
-    required this.onContinue,
-    required this.onLogout,
+    required Future<void> Function() this.onContinue,
+    required Future<void> Function() this.onLogout,
   });
+
+  const PrivacyNoticeScreen.readOnly({super.key, required this.version})
+      : onContinue = null,
+        onLogout = null;
 
   final String version;
 
   /// Records the acknowledgment; throws if it could not be saved.
-  final Future<void> Function() onContinue;
-  final Future<void> Function() onLogout;
+  final Future<void> Function()? onContinue;
+  final Future<void> Function()? onLogout;
+
+  bool get _readOnly => onContinue == null;
 
   @override
   State<PrivacyNoticeScreen> createState() => _PrivacyNoticeScreenState();
@@ -32,9 +43,9 @@ class _PrivacyNoticeScreenState extends State<PrivacyNoticeScreen> {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await widget.onContinue();
+      await widget.onContinue!();
     } catch (error) {
-      debugPrint('Privacy Notice acknowledgment failed: $error');
+      appLog('Privacy Notice acknowledgment failed', error.runtimeType);
       if (!mounted) return;
       messenger.showSnackBar(
         const SnackBar(
@@ -51,7 +62,7 @@ class _PrivacyNoticeScreenState extends State<PrivacyNoticeScreen> {
   Future<void> _logout() async {
     setState(() => _busy = true);
     try {
-      await widget.onLogout();
+      await widget.onLogout!();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -81,7 +92,7 @@ class _PrivacyNoticeScreenState extends State<PrivacyNoticeScreen> {
                 ),
               ),
             ),
-            _buildFooter(),
+            widget._readOnly ? _buildCloseFooter() : _buildFooter(),
           ],
         ),
       ),
@@ -140,11 +151,38 @@ class _PrivacyNoticeScreenState extends State<PrivacyNoticeScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Please read and accept before continuing',
+          Text(
+            widget._readOnly
+                ? 'Notice you acknowledged when signing in'
+                : 'Please read and accept before continuing',
             style: TextStyle(color: Color(0xFFDBEAFE), fontSize: 13),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCloseFooter() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8FAFC),
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: FilledButton(
+        onPressed: () => Navigator.of(context).maybePop(),
+        style: FilledButton.styleFrom(
+          backgroundColor: _navy,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: const Text(
+          'Close',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

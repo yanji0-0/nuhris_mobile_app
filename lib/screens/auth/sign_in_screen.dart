@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../config/app_config.dart';
+import '../../utils/app_log.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({
@@ -6,6 +10,9 @@ class SignInScreen extends StatefulWidget {
     required this.onSignIn,
     this.authUid,
   });
+
+  @visibleForTesting
+  static const passwordFieldKey = Key('sign-in-password');
 
   final Future<String?> Function(String email, String password) onSignIn;
   final String? authUid;
@@ -21,7 +28,6 @@ class _SignInScreenState extends State<SignInScreen> {
       'These credentials do not match our records.';
   bool _isSubmitting = false;
   bool _obscurePassword = true;
-  bool _rememberMe = false;
   String? _loginError;
 
   Future<void> _submitSignIn() async {
@@ -48,6 +54,35 @@ class _SignInScreenState extends State<SignInScreen> {
 
     if (error != null) {
       setState(() => _loginError = _mapLoginErrorMessage(error));
+    }
+  }
+
+  /// Passwords are owned by the NUHRIS web portal (Laravel), which syncs
+  /// them to Supabase Auth after a reset, so the reset must happen there.
+  /// Nothing is reported as "sent" unless the reset page actually opened.
+  Future<void> _openPasswordReset() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final baseUrl = AppConfig.secureBaseUrl;
+    var opened = false;
+    if (baseUrl != null) {
+      try {
+        opened = await launchUrl(
+          Uri.parse('$baseUrl/forgot-password'),
+          mode: LaunchMode.externalApplication,
+        );
+      } catch (error) {
+        appLog('Password reset page failed to open', error.runtimeType);
+      }
+    }
+    if (!opened) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Password reset is not available in the app right now. '
+            'Please use the NUHRIS web portal or contact HR.',
+          ),
+        ),
+      );
     }
   }
 
@@ -334,8 +369,13 @@ class _SignInScreenState extends State<SignInScreen> {
                         ),
                         const SizedBox(height: 6),
                         TextField(
+                          key: SignInScreen.passwordFieldKey,
                           controller: passCtrl,
                           obscureText: _obscurePassword,
+                          // Keep the password out of keyboard suggestion and
+                          // learning dictionaries, even while it is revealed.
+                          enableSuggestions: false,
+                          autocorrect: false,
                           onChanged: (_) {
                             if (_loginError != null) {
                               setState(() => _loginError = null);
@@ -359,35 +399,18 @@ class _SignInScreenState extends State<SignInScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: Checkbox(
-                                value: _rememberMe,
-                                onChanged: (value) {
-                                  setState(() => _rememberMe = value ?? false);
-                                },
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                activeColor: const Color(0xFF0D3C73),
-                                side: const BorderSide(
-                                  color: Color(0xFFB7C2D3),
-                                  width: 1.1,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            const Text(
-                              'Remember me',
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _isSubmitting ? null : _openPasswordReset,
+                            child: const Text(
+                              'Forgot password?',
                               style: TextStyle(
-                                color: Color(0xFF4E6284),
-                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF0D3C73),
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          ],
+                          ),
                         ),
                         const SizedBox(height: 14),
                         SizedBox(

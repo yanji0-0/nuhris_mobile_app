@@ -7,6 +7,7 @@ import '../navigation/app_nav.dart';
 import '../providers/academic_calendar_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/notifications_provider.dart';
+import '../services/api_client.dart' show userMessageFor;
 import '../widgets/app_drawer.dart';
 import '../widgets/nuhris_app_bar.dart';
 
@@ -200,9 +201,10 @@ class _SummarySection extends ConsumerWidget {
     final schedule = (data?['latest_approved_schedule'] as Map?)
         ?.cast<String, dynamic>();
 
+    // Placeholder only while nothing has loaded yet; background refreshes
+    // (and their failures) keep the last values on screen.
     String countText(String key) {
-      if (state.isLoading && data == null) return '—';
-      if (state.hasError) return '—';
+      if (data == null) return '—';
       return ((presentDays[key] as num?) ?? 0).toInt().toString();
     }
 
@@ -236,11 +238,12 @@ class _SummarySection extends ConsumerWidget {
       onTap: () => onNavigate(AppNavItem.attendanceDtr),
     );
 
-    final error = state.hasError
+    // Retry is only offered when there is no data to show at all.
+    final error = state.hasError && data == null
         ? Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: _InlineError(
-              message: 'Failed to load attendance summary: ${state.error}',
+              message: userMessageFor(state.error),
               onRetry: () => ref.read(dashboardProvider.notifier).refresh(),
             ),
           )
@@ -435,7 +438,7 @@ class _RecentAlertsCard extends ConsumerWidget {
         child: Center(child: CircularProgressIndicator()),
       ),
       error: (error, _) => _InlineError(
-        message: 'Failed to load alerts: $error',
+        message: userMessageFor(error),
         onRetry: () =>
             ref.read(notificationsControllerProvider.notifier).refresh(),
       ),
@@ -590,13 +593,16 @@ class _CalendarCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(academicCalendarProvider);
 
+    // Keep loaded entries visible during a re-fetch or a failed re-fetch.
     final Widget upcoming = state.when(
+      skipLoadingOnReload: true,
+      skipError: true,
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
         child: Center(child: CircularProgressIndicator()),
       ),
       error: (error, _) => _InlineError(
-        message: 'Failed to load Academic Calendar: $error',
+        message: userMessageFor(error),
         onRetry: () => ref.read(academicCalendarProvider.notifier).refresh(),
       ),
       data: (calendar) {
