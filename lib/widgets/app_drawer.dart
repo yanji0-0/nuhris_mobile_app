@@ -215,8 +215,7 @@ class _Header extends ConsumerWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: AppColors.nuhrisYellow,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.16),
@@ -225,13 +224,11 @@ class _Header extends ConsumerWidget {
                     ),
                   ],
                 ),
-                alignment: Alignment.center,
-                child: const Text(
-                  'NU',
-                  style: TextStyle(
-                    color: AppColors.appBarNavy,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    'assets/images/nuhris_mobile_logo.jpg',
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),
